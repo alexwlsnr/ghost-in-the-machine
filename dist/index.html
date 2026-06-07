@@ -13,24 +13,17 @@
     background: #0a0a0a;
     color: #33ff33;
     font-family: 'VT323', 'Courier New', monospace;
+    width: 100vw;
     height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
     overflow: hidden;
   }
 
   #screen {
-    width: 800px;
-    max-width: 95vw;
-    height: 600px;
-    max-height: 90vh;
+    width: 100vw;
+    height: 100vh;
     background: #0c0c0c;
-    border: 2px solid #33ff33;
-    border-radius: 4px;
     position: relative;
-    box-shadow: 0 0 20px rgba(51, 255, 51, 0.15), inset 0 0 40px rgba(0,0,0,0.8);
+    box-shadow: inset 0 0 60px rgba(0,0,0,0.8);
   }
 
   #scanlines {
@@ -49,11 +42,11 @@
 
   #terminal {
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 40px;
-    padding: 16px;
+    top: 0; left: 0; right: 0; bottom: 52px;
+    padding: 24px;
     overflow-y: auto;
-    font-size: 18px;
-    line-height: 1.5;
+    font-size: 24px;
+    line-height: 1.4;
     white-space: pre-wrap;
     word-break: break-all;
   }
@@ -63,22 +56,22 @@
   #terminal .prompt { color: #ffaa00; }
   #terminal .response { color: #66ff66; }
   #terminal .error { color: #ff3333; }
-  #terminal .stats { color: #555; font-size: 14px; }
+  #terminal .stats { color: #555; font-size: 18px; }
 
   #input-line {
     position: absolute;
     bottom: 0; left: 0; right: 0;
-    height: 40px;
+    height: 52px;
     display: flex;
     align-items: center;
-    padding: 0 16px;
+    padding: 0 24px;
     border-top: 1px solid #33ff3322;
   }
 
   #prompt-marker {
     color: #ffaa00;
-    margin-right: 8px;
-    font-size: 18px;
+    margin-right: 10px;
+    font-size: 24px;
   }
 
   #query-input {
@@ -87,15 +80,20 @@
     border: none;
     color: #fff;
     font-family: 'VT323', 'Courier New', monospace;
-    font-size: 18px;
+    font-size: 24px;
     outline: none;
     caret-color: #33ff33;
+    text-transform: uppercase;
+  }
+
+  #query-input::placeholder {
+    text-transform: none;
   }
 
   #cursor {
     display: inline-block;
-    width: 10px;
-    height: 20px;
+    width: 12px;
+    height: 26px;
     background: #33ff33;
     animation: blink 1s step-end infinite;
     vertical-align: middle;
@@ -109,13 +107,13 @@
 
   #status-bar {
     position: absolute;
-    bottom: 40px; left: 0; right: 0;
-    height: 20px;
+    bottom: 52px; left: 0; right: 0;
+    height: 26px;
     background: #33ff3311;
     display: flex;
     align-items: center;
-    padding: 0 16px;
-    font-size: 13px;
+    padding: 0 24px;
+    font-size: 16px;
     color: #33ff3388;
     justify-content: space-between;
   }
@@ -129,7 +127,7 @@
     justify-content: center;
     flex-direction: column;
     z-index: 20;
-    font-size: 20px;
+    font-size: 26px;
   }
 
   #loading-bar {
@@ -238,7 +236,7 @@ input.addEventListener('keydown', async (e) => {
 
   input.value = '';
   input.disabled = true;
-  appendLine(`> ${query}`, 'prompt');
+  appendLine(`> ${query.toUpperCase()}`, 'prompt');
 
   perfInfo.textContent = 'GENERATING...';
   let response = '';
