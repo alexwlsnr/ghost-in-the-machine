@@ -161,13 +161,14 @@ function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, toke
   for (let j = 0; j < d; j++) lnBuf[j] = emb[lp * d + j];
   api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
 
-  const zb = f32(oOff, d);
+  const zb = f32(oOff, arch.vocab_size);
   zb.fill(0);
-  const lgOff = oOff + d * 4;
+  const lgOff = oOff + arch.vocab_size * 4;   // after bias buffer
   api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
   return f32(lgOff, arch.vocab_size);
 }
 
+export { forward as _forward };  // debug
 // ─── Generation ────────────────────────────────────────────────────
 
 export interface Step { char: string; token: number; done: boolean; }
