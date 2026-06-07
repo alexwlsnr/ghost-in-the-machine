@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ghost in the Machine — Tier 2.5</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0a;
+    color: #33ff33;
+    font-family: 'VT323', 'Courier New', monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  #screen {
+    width: 800px;
+    max-width: 95vw;
+    height: 600px;
+    max-height: 90vh;
+    background: #0c0c0c;
+    border: 2px solid #33ff33;
+    border-radius: 4px;
+    position: relative;
+    box-shadow: 0 0 20px rgba(51, 255, 51, 0.15), inset 0 0 40px rgba(0,0,0,0.8);
+  }
+
+  #scanlines {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 2px,
+      rgba(0,0,0,0.3) 2px,
+      rgba(0,0,0,0.3) 4px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  #terminal {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 40px;
+    padding: 16px;
+    overflow-y: auto;
+    font-size: 18px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  #terminal .boot { color: #888; }
+  #terminal .ready { color: #33ff33; }
+  #terminal .prompt { color: #ffaa00; }
+  #terminal .response { color: #66ff66; }
+  #terminal .error { color: #ff3333; }
+  #terminal .stats { color: #555; font-size: 14px; }
+
+  #input-line {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    border-top: 1px solid #33ff3322;
+  }
+
+  #prompt-marker {
+    color: #ffaa00;
+    margin-right: 8px;
+    font-size: 18px;
+  }
+
+  #query-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 18px;
+    outline: none;
+    caret-color: #33ff33;
+  }
+
+  #cursor {
+    display: inline-block;
+    width: 10px;
+    height: 20px;
+    background: #33ff33;
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+    margin-left: 2px;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  #status-bar {
+    position: absolute;
+    bottom: 40px; left: 0; right: 0;
+    height: 20px;
+    background: #33ff3311;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    font-size: 13px;
+    color: #33ff3388;
+    justify-content: space-between;
+  }
+
+  #loading-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #0a0a0a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 20;
+    font-size: 20px;
+  }
+
+  #loading-bar {
+    width: 300px;
+    height: 4px;
+    background: #222;
+    margin-top: 16px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  #loading-fill {
+    height: 100%;
+    background: #33ff33;
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="screen">
+  <div id="scanlines"></div>
+  <div id="loading-overlay">
+    <div>INITIALIZING GHOST...</div>
+    <div id="loading-bar"><div id="loading-fill"></div></div>
+    <div id="loading-text" style="margin-top:8px;font-size:14px;color:#888;"></div>
+  </div>
+  <div id="terminal"></div>
+  <div id="status-bar">
+    <span id="model-info">---</span>
+    <span id="perf-info">---</span>
+  </div>
+  <div id="input-line">
+    <span id="prompt-marker">></span>
+    <input id="query-input" type="text" placeholder="TYPE YOUR QUERY..." autofocus disabled>
+    <span id="cursor"></span>
+  </div>
+</div>
+
+<script type="module">
+import { loadModel, encode, generate } from './tier2_transformer.js?v=4';
+
+const terminal = document.getElementById('terminal');
+const input = document.getElementById('query-input');
+const loading = document.getElementById('loading-overlay');
+const loadingFill = document.getElementById('loading-fill');
+const loadingText = document.getElementById('loading-text');
+const modelInfo = document.getElementById('model-info');
+const perfInfo = document.getElementById('perf-info');
+
+let model = null;
+
+function appendLine(text, cls = '') {
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = text;
+  terminal.appendChild(div);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+async function boot() {
+  appendLine('GHOST IN THE MACHINE v2.5', 'ready');
+  appendLine('Byte-level Tiny Transformer — float32', 'boot');
+  appendLine('Kernel: WebAssembly | 256d x 4L x 4H | Weights: 13MB', 'boot');
+  appendLine('───────────────────────────────────────────────', 'boot');
+
+  loadingFill.style.width = '10%';
+  loadingText.textContent = 'Loading Wasm kernel...';
+
+  try {
+    model = await loadModel({
+      wasm: './tier2_kernel.wasm?v=4',
+      bin: './transformer_model.bin?v=4',
+      json: './transformer_model.json?v=4',
+    });
+  } catch(e) {
+    appendLine(`LOAD ERROR: ${e.message}`, 'error');
+    loading.classList.add('hidden');
+    return;
+  }
+
+  loadingFill.style.width = '100%';
+  loadingText.textContent = 'Ready.';
+
+  const arch = model.manifest;
+  modelInfo.textContent = `${arch.d_model}dim × ${arch.n_layers}L × ${arch.n_heads}H | vocab ${arch.vocab_size}`;
+  perfInfo.textContent = 'READY';
+
+  setTimeout(() => {
+    loading.classList.add('hidden');
+    input.disabled = false;
+    input.focus();
+    appendLine('', '');
+    appendLine('READY. ENTER QUERY:', 'ready');
+  }, 500);
+}
+
+input.addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter' || !model || input.disabled) return;
+
+  const query = input.value.trim();
+  if (!query) return;
+
+  input.value = '';
+  input.disabled = true;
+  appendLine(`> ${query}`, 'prompt');
+
+  perfInfo.textContent = 'GENERATING...';
+  let response = '';
+  const startTime = performance.now();
+  let tokenCount = 0;
+
+  try {
+    for await (const step of generate(model, query, 80, 0.8)) {
+      if (step.done) break;
+      response += step.char;
+      tokenCount++;
+
+      // Update live
+      const lastChild = terminal.lastElementChild;
+      if (lastChild && lastChild.className === 'response') {
+        lastChild.textContent = response;
+      } else {
+        appendLine(response, 'response');
+      }
+    }
+  } catch(e) {
+    appendLine(`ERROR: ${e.message}`, 'error');
+  }
+
+  const elapsed = performance.now() - startTime;
+  const msPerToken = tokenCount > 0 ? (elapsed / tokenCount).toFixed(1) : 0;
+  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${msPerToken}ms/tok)`;
+
+  input.disabled = false;
+  input.focus();
+});
+
+boot();
+</script>
+</body>
+</html>

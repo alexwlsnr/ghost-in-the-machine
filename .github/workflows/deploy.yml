@@ -1,0 +1,66 @@
+name: Build & Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build Wasm kernel
+        working-directory: wasm
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Copy Wasm to dist
+        run: cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install & build TypeScript
+        working-directory: ts
+        run: |
+          npm install
+          npx tsc -p tsconfig.transformer.json
+
+      - name: Copy TS output to dist
+        run: cp ts/dist/tier2_transformer.js dist/
+
+      - name: Verify dist contents
+        run: ls -lh dist/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

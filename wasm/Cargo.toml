@@ -1,0 +1,15 @@
+[package]
+name = "tier2-kernel"
+version = "0.2.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"
+
+[dependencies]

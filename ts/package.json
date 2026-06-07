@@ -1,0 +1,16 @@
+{
+  "name": "tier2",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tier 2 — Ghost in the Machine (Z80-μLM in the browser)",
+  "main": "dist/tier2.js",
+  "types": "dist/tier2.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

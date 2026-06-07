@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Rust
+wasm/target/
+
+# Node
+ts/node_modules/
+ts/dist/
+ts/package-lock.json
+
+# Model checkpoints (too large; dist bundles are the deployable artifacts)
+*.pt
+*.pt.bak
+
+# OS
+.DS_Store
+Thumbs.db
