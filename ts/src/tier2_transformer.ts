@@ -24,6 +24,15 @@ async function fetchBuf(url: string): Promise<ArrayBuffer> {
   return r.arrayBuffer();
 }
 
+// Worst-case scratch the forward pass bump-allocates (bytes) at full context.
+// Mirrors the `ba(...)` allocations in forward() — keep the two in sync.
+function forwardScratchBytes(arch: Arch): number {
+  const d = arch.d_model, ff = arch.d_ff, v = arch.vocab_size, seq = arch.max_len;
+  const al = (n: number) => (n * 4 + 15) & ~15;
+  return al(seq * d) + al(seq * d * 3) + al(seq * Math.max(d, ff))
+       + al(d) + al(seq * seq) + al(seq * d) + al(v * 2);
+}
+
 export async function loadModel(urls: { wasm: string; bin: string; json: string }) {
   const [wasmBuf, binBuf, jsonBuf] = await Promise.all([
     fetchBuf(urls.wasm), fetchBuf(urls.bin), fetchBuf(urls.json),
@@ -50,7 +59,10 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
 
   let maxOff = 0;
   for (const s of Object.values(sec)) maxOff = Math.max(maxOff, s.offset + s.size);
-  const needPages = Math.ceil((base + maxOff + 8 * 1024 * 1024) / 65536);
+  // Headroom = the forward pass's scratch, sized from the arch (not a fixed 8 MB),
+  // so larger models (more layers, longer context) get enough memory. +1 page slack.
+  const margin = forwardScratchBytes(manifest.architecture) + 65536;
+  const needPages = Math.ceil((base + maxOff + margin) / 65536);
   const curPages = mem.buffer.byteLength / 65536;
   if (needPages > curPages) mem.grow(needPages - curPages);
 
@@ -92,7 +104,7 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
   const lOff = ba(d);
   const sOff = ba(seq * seq);
   const aOff = ba(seq * d);
-  const oOff = ba(arch.vocab_size + d);
+  const oOff = ba(arch.vocab_size * 2);   // zero-bias buffer + logits, vocab_size each
 
   // 1. Embedding
   const teW = f32(S('token_embed'), arch.vocab_size * d);
