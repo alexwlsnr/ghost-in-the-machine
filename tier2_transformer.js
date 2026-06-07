@@ -2,6 +2,7 @@
  * Tier 2.5 Ghost Transformer — Float32 Orchestrator (fixed lengths)
  */
 const PAD = 256;
+const EOS = 257;
 async function fetchBuf(url) {
     const r = await fetch(url);
     if (!r.ok)
@@ -175,7 +176,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
                 break;
             }
         }
-        if (next === PAD) {
+        if (next === EOS || next === PAD) {
             yield { char: '', token: next, done: true };
             return;
         }
