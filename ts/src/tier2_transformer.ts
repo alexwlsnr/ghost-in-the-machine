@@ -168,7 +168,6 @@ function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, toke
   return f32(lgOff, arch.vocab_size);
 }
 
-export { forward as _forward };  // debug
 // ─── Generation ────────────────────────────────────────────────────
 
 export interface Step { char: string; token: number; done: boolean; }
