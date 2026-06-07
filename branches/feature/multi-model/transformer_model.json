@@ -1,5 +1,6 @@
 {
-  "version": "3.1",
+  "version": "4.0",
+  "weight_bits": 32,
   "architecture": {
     "type": "tiny_transformer",
     "vocab_size": 258,

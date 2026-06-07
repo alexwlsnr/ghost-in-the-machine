@@ -9,10 +9,23 @@ async function fetchBuf(url) {
         throw new Error(`HTTP ${r.status}: ${url}`);
     return r.arrayBuffer();
 }
+// Worst-case scratch the forward pass bump-allocates (bytes) at full context.
+// Mirrors the `ba(...)` allocations in forward() — keep the two in sync.
+function forwardScratchBytes(arch) {
+    const d = arch.d_model, ff = arch.d_ff, v = arch.vocab_size, seq = arch.max_len;
+    const al = (n) => (n * 4 + 15) & ~15;
+    return al(seq * d) + al(seq * d * 3) + al(seq * Math.max(d, ff))
+        + al(d) + al(seq * seq) + al(seq * d) + al(v * 2);
+}
 export async function loadModel(urls) {
     const [wasmBuf, binBuf, jsonBuf] = await Promise.all([
         fetchBuf(urls.wasm), fetchBuf(urls.bin), fetchBuf(urls.json),
     ]);
+    return instantiateModel(wasmBuf, binBuf, jsonBuf);
+}
+// Construct a model from already-loaded buffers (no fetch). Split out of loadModel
+// so the forward pass can be driven under Node for parity tests.
+export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const wasm = await WebAssembly.instantiate(wasmBuf);
     const api = wasm.instance.exports;
     const manifest = JSON.parse(new TextDecoder().decode(jsonBuf));
@@ -26,7 +39,10 @@ export async function loadModel(urls) {
     let maxOff = 0;
     for (const s of Object.values(sec))
         maxOff = Math.max(maxOff, s.offset + s.size);
-    const needPages = Math.ceil((base + maxOff + 8 * 1024 * 1024) / 65536);
+    // Headroom = the forward pass's scratch, sized from the arch (not a fixed 8 MB),
+    // so larger models (more layers, longer context) get enough memory. +1 page slack.
+    const margin = forwardScratchBytes(manifest.architecture) + 65536;
+    const needPages = Math.ceil((base + maxOff + margin) / 65536);
     const curPages = mem.buffer.byteLength / 65536;
     if (needPages > curPages)
         mem.grow(needPages - curPages);
@@ -47,7 +63,7 @@ export function encode(text) {
     return t;
 }
 // ─── Forward ───────────────────────────────────────────────────────
-function forward(api, sec, arch, tokens, base) {
+export function forward(api, sec, arch, tokens, base) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
     // Section pointer helper: actual address = base + manifest offset
     const S = (name) => base + sec[name].offset;
@@ -63,10 +79,10 @@ function forward(api, sec, arch, tokens, base) {
     const lOff = ba(d);
     const sOff = ba(seq * seq);
     const aOff = ba(seq * d);
-    const oOff = ba(arch.vocab_size + d);
+    const oOff = ba(arch.vocab_size * 2); // zero-bias buffer + logits, vocab_size each
     // 1. Embedding
-    const teW = f32(S('token_embed'), 257 * d);
-    const peW = f32(S('pos_embed'), 64 * d);
+    const teW = f32(S('token_embed'), arch.vocab_size * d);
+    const peW = f32(S('pos_embed'), arch.max_len * d);
     const emb = f32(eOff, seq * d);
     for (let p = 0; p < seq; p++) {
         const tid = tokens[p];
@@ -143,7 +159,7 @@ function forward(api, sec, arch, tokens, base) {
     api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
-export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
+export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1; // hard context limit of the model
     const tokens = encode(prompt.toUpperCase()).slice(0, win);
@@ -168,7 +184,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
             probs[i] = Math.exp((logits[i] - maxV) / temp);
             sum += probs[i];
         }
-        let r = Math.random() * sum, next = 0;
+        let r = rand() * sum, next = 0;
         for (let i = 0; i < arch.vocab_size; i++) {
             r -= probs[i];
             if (r <= 0) {
