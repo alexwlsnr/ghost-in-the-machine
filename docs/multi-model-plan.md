@@ -54,8 +54,10 @@ support, it follows behavior instructions reliably.
   3× faster, which is hours saved at 200K pairs if quality is now comparable.
 - `gemma4-e2b-distill` is not a canonical Google release name (the `E2B`/`E4B`
   naming belongs to **Gemma 3n**, the on-device variant; there is no "Gemma 4").
-  This is a local llama-swap alias — **record what GGUF / base model it actually
-  resolves to** so the pipeline is reproducible later.
+  It is a local llama-swap alias that resolves to
+  **`unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q2_K_XL`** (served on `:8080`) — recorded
+  here for reproducibility. Note it's a Q2_K QAT quant, so teacher quality is
+  already somewhat degraded; worth keeping in mind if response quality disappoints.
 
 ### System prompt architecture
 

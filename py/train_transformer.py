@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
+from contextlib import nullcontext
 from typing import List, Tuple
 
 # ─── Constants ─────────────────────────────────────────────────────
@@ -204,6 +205,13 @@ def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN) -> 
 
 # ─── Training ───────────────────────────────────────────────────────
 
+def make_batches(items, batch_size: int):
+    """Split a sequence into consecutive batches of at most batch_size."""
+    if batch_size < 1:
+        raise ValueError("batch_size must be >= 1")
+    return [items[i:i + batch_size] for i in range(0, len(items), batch_size)]
+
+
 def train_transformer(
     model: TinyTransformer,
     pairs: List[Tuple[str, str]],
@@ -211,6 +219,10 @@ def train_transformer(
     lr: float = 0.003,
     device: str = 'cuda',
     checkpoint_file: str = 'transformer_model.pt',
+    batch_size: int = 16,
+    amp: bool = False,
+    qat_every: int = 1,
+    qat_weight: float = 0.10,
 ):
     print(f"Device: {device}")
     print(f"Training on {len(pairs)} pairs, {epochs} epochs")
@@ -236,8 +248,17 @@ def train_transformer(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs)
 
+    use_amp = amp and str(device).startswith('cuda')
+    if use_amp:
+        print("Mixed precision: bf16 autocast enabled")
+
+    def autocast_ctx():
+        return (torch.autocast(device_type='cuda', dtype=torch.bfloat16)
+                if use_amp else nullcontext())
+
     best_acc = 0.0
     best_epoch = 0
+    step = 0
 
     for epoch in range(epochs):
         total_loss = 0.0
@@ -247,8 +268,7 @@ def train_transformer(
 
         idxs = np.random.permutation(len(all_inputs))
 
-        for batch_start in range(0, len(idxs), 16):
-            batch_idxs = idxs[batch_start:batch_start + 16]
+        for batch_idxs in make_batches(idxs, batch_size):
             batch_inputs = [all_inputs[i] for i in batch_idxs]
             batch_targets = [all_targets[i] for i in batch_idxs]
 
@@ -266,16 +286,21 @@ def train_transformer(
 
             optimizer.zero_grad()
 
-            logits = model(x)
-            loss = F.cross_entropy(
-                logits.reshape(-1, model.vocab_size),
-                y.reshape(-1),
-                ignore_index=PAD_TOKEN,
-            )
+            with autocast_ctx():
+                logits = model(x)
+                loss = F.cross_entropy(
+                    logits.reshape(-1, model.vocab_size),
+                    y.reshape(-1),
+                    ignore_index=PAD_TOKEN,
+                )
 
-            # Add quantization loss
-            qloss = model.compute_quantization_loss() * 0.10
-            (loss + qloss).backward()
+            # Quantization-aware penalty is expensive (per-tensor quantile), so
+            # apply it only every `qat_every` steps. qat_every<=0 disables it.
+            if qat_every > 0 and step % qat_every == 0:
+                total = loss + model.compute_quantization_loss() * qat_weight
+            else:
+                total = loss
+            total.backward()
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -286,6 +311,7 @@ def train_transformer(
             total_correct += (pred_tokens[mask] == y[mask]).sum().item()
             total_tokens += mask.sum().item()
             n_batches += 1
+            step += 1
 
         scheduler.step()
 
@@ -370,6 +396,13 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default='transformer_model.pt')
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--lr', type=float, default=0.003)
+    parser.add_argument('--batch-size', type=int, default=16,
+                        help='recommended 64-256 on the 5080 for the small tiers')
+    parser.add_argument('--amp', action='store_true',
+                        help='bf16 autocast (CUDA only; no-op on CPU)')
+    parser.add_argument('--qat-every', type=int, default=1,
+                        help='apply the quantization penalty every N steps (0=off)')
+    parser.add_argument('--qat-weight', type=float, default=0.10)
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -420,6 +453,8 @@ if __name__ == '__main__':
     model = train_transformer(
         model, pairs, epochs=remaining, lr=args.lr,
         device=device, checkpoint_file=args.checkpoint,
+        batch_size=args.batch_size, amp=args.amp,
+        qat_every=args.qat_every, qat_weight=args.qat_weight,
     )
 
     # Test generation
