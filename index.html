@@ -217,7 +217,7 @@
     <div id="temp-group">
       <span id="temp-label">TEMP</span>
       <button id="temp-down" class="temp-btn">◂</button>
-      <span id="temp-value">0.6</span>
+      <span id="temp-value">0.8</span>
       <button id="temp-up" class="temp-btn">▸</button>
     </div>
   </div>
@@ -238,7 +238,7 @@ const modelInfo = document.getElementById('model-info');
 const perfInfo = document.getElementById('perf-info');
 
 let model = null;
-let temperature = 0.6;
+let temperature = 0.8;
 const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
 
 function updateTempDisplay() {
@@ -263,7 +263,7 @@ function appendLine(text, cls = '') {
 }
 
 async function boot() {
-  appendLine('GHOST IN THE MACHINE v2.5 (build 9)', 'ready');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 10)', 'ready');
   appendLine('Byte-level Tiny Transformer — float32', 'boot');
   appendLine('Kernel: WebAssembly | 256d x 4L x 4H | Weights: 13MB', 'boot');
   appendLine('───────────────────────────────────────────────', 'boot');
