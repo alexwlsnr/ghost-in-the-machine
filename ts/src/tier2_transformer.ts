@@ -24,10 +24,25 @@ async function fetchBuf(url: string): Promise<ArrayBuffer> {
   return r.arrayBuffer();
 }
 
+// Worst-case scratch the forward pass bump-allocates (bytes) at full context.
+// Mirrors the `ba(...)` allocations in forward() — keep the two in sync.
+function forwardScratchBytes(arch: Arch): number {
+  const d = arch.d_model, ff = arch.d_ff, v = arch.vocab_size, seq = arch.max_len;
+  const al = (n: number) => (n * 4 + 15) & ~15;
+  return al(seq * d) + al(seq * d * 3) + al(seq * Math.max(d, ff))
+       + al(d) + al(seq * seq) + al(seq * d) + al(v * 2);
+}
+
 export async function loadModel(urls: { wasm: string; bin: string; json: string }) {
   const [wasmBuf, binBuf, jsonBuf] = await Promise.all([
     fetchBuf(urls.wasm), fetchBuf(urls.bin), fetchBuf(urls.json),
   ]);
+  return instantiateModel(wasmBuf, binBuf, jsonBuf);
+}
+
+// Construct a model from already-loaded buffers (no fetch). Split out of loadModel
+// so the forward pass can be driven under Node for parity tests.
+export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffer, jsonBuf: ArrayBuffer) {
   const wasm = await WebAssembly.instantiate(wasmBuf);
   const api = wasm.instance.exports as unknown as WasmApi;
   const manifest = JSON.parse(new TextDecoder().decode(jsonBuf)) as {
@@ -44,7 +59,10 @@ export async function loadModel(urls: { wasm: string; bin: string; json: string 
 
   let maxOff = 0;
   for (const s of Object.values(sec)) maxOff = Math.max(maxOff, s.offset + s.size);
-  const needPages = Math.ceil((base + maxOff + 8 * 1024 * 1024) / 65536);
+  // Headroom = the forward pass's scratch, sized from the arch (not a fixed 8 MB),
+  // so larger models (more layers, longer context) get enough memory. +1 page slack.
+  const margin = forwardScratchBytes(manifest.architecture) + 65536;
+  const needPages = Math.ceil((base + maxOff + margin) / 65536);
   const curPages = mem.buffer.byteLength / 65536;
   if (needPages > curPages) mem.grow(needPages - curPages);
 
@@ -67,7 +85,7 @@ export function encode(text: string): number[] {
 
 // ─── Forward ───────────────────────────────────────────────────────
 
-function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
+export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
 
   // Section pointer helper: actual address = base + manifest offset
@@ -86,11 +104,11 @@ function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, toke
   const lOff = ba(d);
   const sOff = ba(seq * seq);
   const aOff = ba(seq * d);
-  const oOff = ba(arch.vocab_size + d);
+  const oOff = ba(arch.vocab_size * 2);   // zero-bias buffer + logits, vocab_size each
 
   // 1. Embedding
-  const teW = f32(S('token_embed'), 257 * d);
-  const peW = f32(S('pos_embed'), 64 * d);
+  const teW = f32(S('token_embed'), arch.vocab_size * d);
+  const peW = f32(S('pos_embed'), arch.max_len * d);
   const emb = f32(eOff, seq * d);
   for (let p = 0; p < seq; p++) {
     const tid = tokens[p];
@@ -174,7 +192,7 @@ export interface Step { char: string; token: number; done: boolean; }
 
 export async function* generate(
   model: Awaited<ReturnType<typeof loadModel>>,
-  prompt: string, maxNew = 160, temp = 0.8,
+  prompt: string, maxNew = 160, temp = 0.8, rand: () => number = Math.random,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
   const win = arch.max_len - 1;            // hard context limit of the model
@@ -196,7 +214,7 @@ export async function* generate(
     let sum = 0;
     const probs = new Float64Array(arch.vocab_size);
     for (let i = 0; i < arch.vocab_size; i++) { probs[i] = Math.exp((logits[i] - maxV) / temp); sum += probs[i]; }
-    let r = Math.random() * sum, next = 0;
+    let r = rand() * sum, next = 0;
     for (let i = 0; i < arch.vocab_size; i++) { r -= probs[i]; if (r <= 0) { next = i; break; } }
 
     if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }

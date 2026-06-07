@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install & build TypeScript
         working-directory: ts
@@ -42,6 +42,12 @@ jobs:
 
       - name: Verify dist contents
         run: ls -lh dist/
+
+      # Regression net: kernel ops, end-to-end logits parity vs the committed
+      # PyTorch reference, and generation goldens. Runs against the just-built
+      # wasm/ts + the committed bundle, so a broken deploy is blocked here.
+      - name: Run tests
+        run: node --test test/*.test.js
 
       - name: Determine deploy path
         id: dest
