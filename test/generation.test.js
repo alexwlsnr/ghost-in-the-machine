@@ -52,3 +52,19 @@ test('generate() is reproducible given a seeded RNG', async () => {
   const b = await run('TELL ME A JOKE', 12345, 2.0);
   assert.equal(a, b);
 });
+
+// Golden decoded outputs — captured from the current bundle at seed 777, temp 1.0.
+// The model + weights don't change during pre-work, so these must stay identical;
+// any drift means the serializer / forward / generate rework altered behavior.
+const GOLDEN = [
+  ['HELLO', 'HEY WHATS UP? HOWS YOUR DAY GOING SO FAR?'],
+  ['TELL ME A JOKE', 'WHY DID THE SCARECROW WIN AN AWARD? BECAUSE HE WA'],
+  ['GOODBYE', 'TAKE CARE AND TALK TO YOU SOON!'],
+  ['HOW ARE YOU', 'IM DOING GREAT THANKS FOR ASKING! JUST HANGING OUT A'],
+];
+
+test('generate() reproduces the golden decoded outputs', async () => {
+  for (const [prompt, expected] of GOLDEN) {
+    assert.equal(await run(prompt, 777, 1.0), expected, `prompt: ${prompt}`);
+  }
+});
