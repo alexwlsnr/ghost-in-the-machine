@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Ghost in the Machine — Tier 2.5</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
@@ -178,7 +181,10 @@
 </div>
 
 <script type="module">
-import { loadModel, encode, generate } from './tier2_transformer.js?v=5';
+// Code files (tiny) — always fresh to avoid stale-cache bugs.
+// Model weights (13MB) — versioned so they cache between reloads.
+const _t = Date.now();
+const { loadModel, encode, generate } = await import('./tier2_transformer.js?t=' + _t);
 
 const terminal = document.getElementById('terminal');
 const input = document.getElementById('query-input');
@@ -199,7 +205,7 @@ function appendLine(text, cls = '') {
 }
 
 async function boot() {
-  appendLine('GHOST IN THE MACHINE v2.5 (build 4)', 'ready');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 5)', 'ready');
   appendLine('Byte-level Tiny Transformer — float32', 'boot');
   appendLine('Kernel: WebAssembly | 256d x 4L x 4H | Weights: 13MB', 'boot');
   appendLine('───────────────────────────────────────────────', 'boot');
@@ -209,7 +215,7 @@ async function boot() {
 
   try {
     model = await loadModel({
-      wasm: './tier2_kernel.wasm?v=5',
+      wasm: './tier2_kernel.wasm?t=' + _t,
       bin: './transformer_model.bin?v=5',
       json: './transformer_model.json?v=5',
     });
