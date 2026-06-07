@@ -7,13 +7,15 @@ Training: autoregressive on concatenated query+response pairs
 Inference: prompt → generate until PAD token
 """
 
+import os
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import math
 from contextlib import nullcontext
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 # ─── Constants ─────────────────────────────────────────────────────
 
@@ -254,8 +256,25 @@ def train_transformer(
     qat_weight: float = 0.10,
     val_frac: float = 0.0,
     patience: int = 0,
+    status_file: Optional[str] = None,
 ):
     """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
+    # Lazy-import supervision emitter — no hard dep when not used.
+    _write_status = None
+    if status_file:
+        try:
+            from training_status import write_status as _ws
+        except ImportError:
+            import importlib.util
+            _spec = importlib.util.spec_from_file_location(
+                "training_status",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "training_status.py"),
+            )
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _ws = _mod.write_status
+        _write_status = _ws
+
     print(f"Device: {device}")
     print(f"Training on {len(pairs)} pairs, {epochs} epochs")
 
@@ -281,6 +300,7 @@ def train_transformer(
         return (torch.autocast(device_type='cuda', dtype=torch.bfloat16)
                 if use_amp else nullcontext())
 
+    train_start = time.time()
     best_acc = 0.0
     best_val_loss = float('inf')
     best_epoch = 0
@@ -406,10 +426,34 @@ def train_transformer(
         else:
             no_improve += 1
 
+        if _write_status and status_file:
+            elapsed = time.time() - train_start
+            ep_done = epoch + 1
+            eta = int(elapsed / ep_done * (epochs - ep_done)) if ep_done else 0
+            _write_status(
+                status_file,
+                epoch=ep_done, epochs_total=epochs,
+                train_loss=round(avg_loss, 6),
+                val_loss=round(val_loss, 6) if val_loss is not None else None,
+                best_val_loss=round(best_val_loss, 6) if val_inputs else None,
+                best_epoch=best_epoch, stopped_early=False,
+                state="running", pid=os.getpid(),
+                checkpoint=checkpoint_file, eta_seconds=eta,
+            )
+
         if patience > 0 and no_improve >= patience:
             print(f"\nEarly stop at epoch {epoch + 1} (no val improvement for {patience} epochs)")
             stopped_early = True
             break
+
+    if _write_status and status_file:
+        _write_status(
+            status_file,
+            epoch=epoch + 1, epochs_total=epochs,
+            stopped_early=stopped_early,
+            state="early_stopped" if stopped_early else "done",
+            pid=os.getpid(), checkpoint=checkpoint_file, eta_seconds=0,
+        )
 
     print(f"\nBest acc: {best_acc:.3f} at epoch {best_epoch}")
     return {
@@ -482,6 +526,8 @@ if __name__ == '__main__':
                         help='fraction of pairs held out for validation (e.g. 0.05)')
     parser.add_argument('--patience', type=int, default=0,
                         help='early-stop after N epochs of no val improvement (0=off)')
+    parser.add_argument('--status-file', type=str, default=None,
+                        help='path to write status.json each epoch (supervision harness)')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -535,6 +581,7 @@ if __name__ == '__main__':
         batch_size=args.batch_size, amp=args.amp,
         qat_every=args.qat_every, qat_weight=args.qat_weight,
         val_frac=args.val_frac, patience=args.patience,
+        status_file=args.status_file,
     )
     model = result['model']
 
