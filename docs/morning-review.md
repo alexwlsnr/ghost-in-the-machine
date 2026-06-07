@@ -146,48 +146,64 @@ prompts with the same seed. Critical for Specter (without it: ~2s/token in-brows
 
 ---
 
-### 🔄 `feature/quantization` (may not be complete yet)
-**4-bit + 8-bit kernel and serializer — gates Specter shipping.**
+### ✅ `feature/quantization`
+**4-bit + 8-bit kernel + serializer — gates Specter shipping. 15/15 JS + 205/205 Python.**
 
-If pushed:
-- `wasm/src/lib.rs`: `matmul_4bit(scale)` and `matmul_8bit(scale)` exports (per-tensor
-  scale, no hardcoded global constant).
-- `py/serialize.py`: `--weight-bits 32/8/4`, mixed-precision (quantize attn/FFN matrices
-  only, keep embeddings/head/LN/biases fp32).
-- `ts/src/tier2_transformer.ts`: `matmulWeights` dispatch on manifest dtype.
+- `wasm/src/lib.rs`: `matmul_4bit(weights, scale, ...)` and `matmul_8bit(weights, scale, ...)`
+  with per-tensor runtime scale. Fixes the dead `GLOBAL_WEIGHT_SCALE=0.4` path.
+  4-bit: offset-binary nibble packing (high nibble = even index). 8-bit: i8, scale=max/127.
+- `py/serialize.py`: `--weight-bits 32/8/4`. Mixed-precision: embeddings/head/LN/biases
+  stay fp32; attention Q/K/V/O and FFN weights quantized. Scale stored per-section in
+  manifest as `section.scale` (not the old top-level `"scales"` dict).
+- `ts/src/tier2_transformer.ts`: `matmulWeights()` dispatches on `sec[name].dtype`.
+
+⚠️ **Manifest format changed** — scales are now per-section, not a top-level `scales` dict.
+After merging, re-serialize Wisp (`py/serialize.py --weight-bits 32`) and regenerate
+parity fixtures (`npm run fixtures`) before `npm test`.
 
 ---
 
 ## What to run in the morning
 
 ```bash
-# 1. Merge in order (resolve conflicts as noted)
+# 1. Merge in dependency order
 git checkout feature/multi-model
-git merge feature/trainer-integration  # base for everything
-git merge feature/expand-data
-git merge feature/templates-and-scripts-2
-git merge feature/sampling
-git merge feature/model-switcher
-git merge feature/quantization         # if ready
-git merge feature/kv-cache             # if ready
-git merge feature/wraith-mvp
+git merge feature/trainer-integration  # base: val-split, harness, preserve-case
+git merge feature/kv-cache             # based on trainer-integration — expect clean
+git merge feature/expand-data          # data pipeline
+git merge feature/templates-and-scripts-2  # templates + launch scripts
+git merge feature/sampling             # top-k/top-p (pure TS — clean)
+git merge feature/model-switcher       # UI switcher
+git merge feature/quantization         # 4-bit/8-bit kernel+serializer
+git merge feature/wraith-mvp           # Linux guru MVP
 
-# 2. Start data generation (run in a terminal, takes ~1-2h at 32 workers)
+# ⚠️ After merging feature/quantization:
+# The manifest format changed (per-section scales). Must re-serialize before testing:
+python3 py/serialize.py --checkpoint transformer_model_eos.pt --output dist/transformer_model
+npm run fixtures    # regenerate PyTorch parity reference
+npm test            # verify all 15+ JS tests pass
+
+# 2. Start data generation (run in a terminal, ~1-2h at 32 workers)
 bash scripts/run_data_gen.sh
 
-# 3. Once data is ready, train Wisp (validate the pipeline)
+# 3. Once data is ready, train Wisp (validates the full pipeline)
 bash scripts/train_wisp.sh --data data/training_pairs.txt
 
-# 4. Wraith MVP (can run in parallel with Wisp)
+# 4. Wraith MVP (can run in parallel with Wisp — uses tldr data, not generated pairs)
 bash scripts/train_wraith.sh
 
-# 5. Check Wisp quality against generation goldens
-npm test
+# 5. Watch progress via the supervision harness (wakes Claude on events)
+# In a background Claude session:
+#   bash scripts/watch_training.sh logs/wisp_status.json &
 ```
 
-## Test counts (at time of writing)
+## Test counts across all branches
 
-| Suite | Tests | Status |
-|---|---|---|
-| JS (kernel, parity, generation, forward_arch, sampling) | 26 | ✅ all pass |
-| Python (train_loop, generate, training_status, expand_data, preserve_case) | 95+ | ✅ all pass |
+| Suite | Branch | Tests | Status |
+|---|---|---|---|
+| JS: kernel, parity, generation, forward_arch, sampling, kv-cache | feature/kv-cache | 19 | ✅ |
+| JS: kernel (incl. 4-bit/8-bit), parity | feature/quantization | 15 | ✅ |
+| Python: train_loop (incl. preserve-case), generate, training_status | feature/trainer-integration | 33 | ✅ |
+| Python: expand_data (8 classes) | feature/expand-data | 64 | ✅ |
+| Python: quantization serializer | feature/quantization | 205 assertions | ✅ |
+| Python: preserve_case (Wraith) | feature/wraith-mvp | 10 | ✅ |
