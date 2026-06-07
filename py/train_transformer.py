@@ -205,6 +205,35 @@ def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN) -> 
 
 # ─── Training ───────────────────────────────────────────────────────
 
+def split_pairs(pairs, val_frac: float, seed: int = 0):
+    """Deterministically split pairs into (train, val). Always leaves >=1 train."""
+    if not 0.0 <= val_frac < 1.0:
+        raise ValueError("val_frac must be in [0, 1)")
+    pairs = list(pairs)
+    if val_frac == 0.0 or len(pairs) < 2:
+        return pairs, []
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(pairs))
+    n_val = min(max(1, round(len(pairs) * val_frac)), len(pairs) - 1)
+    val_set = set(order[:n_val].tolist())
+    train = [p for i, p in enumerate(pairs) if i not in val_set]
+    val = [p for i, p in enumerate(pairs) if i in val_set]
+    return train, val
+
+
+def _build_sequences(pairs, max_len: int):
+    """Tokenize pairs into (inputs, targets), dropping empty / too-short ones."""
+    inputs, targets = [], []
+    for q, r in pairs:
+        if not q or not r:
+            continue
+        inp, tgt = make_sequence(q.upper().strip(), r.upper().strip(), max_len)
+        if len(inp) >= 4:
+            inputs.append(inp)
+            targets.append(tgt)
+    return inputs, targets
+
+
 def make_batches(items, batch_size: int):
     """Split a sequence into consecutive batches of at most batch_size."""
     if batch_size < 1:
@@ -223,25 +252,21 @@ def train_transformer(
     amp: bool = False,
     qat_every: int = 1,
     qat_weight: float = 0.10,
+    val_frac: float = 0.0,
+    patience: int = 0,
 ):
+    """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
     print(f"Device: {device}")
     print(f"Training on {len(pairs)} pairs, {epochs} epochs")
 
     model = model.to(device)
     model.train()
 
-    # Prepare all sequences
-    all_inputs = []
-    all_targets = []
-    for q, r in pairs:
-        if not q or not r:
-            continue
-        inp, tgt = make_sequence(q.upper().strip(), r.upper().strip(), model.max_len)
-        if len(inp) >= 4:  # need at least a few tokens
-            all_inputs.append(inp)
-            all_targets.append(tgt)
+    train_pairs, val_pairs = split_pairs(pairs, val_frac)
+    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len)
+    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len)
 
-    print(f"Generated {len(all_inputs)} training sequences")
+    print(f"Sequences — train: {len(all_inputs)}, val: {len(val_inputs)}")
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {total_params:,}")
 
@@ -257,8 +282,11 @@ def train_transformer(
                 if use_amp else nullcontext())
 
     best_acc = 0.0
+    best_val_loss = float('inf')
     best_epoch = 0
+    no_improve = 0
     step = 0
+    stopped_early = False
 
     for epoch in range(epochs):
         total_loss = 0.0
@@ -318,12 +346,46 @@ def train_transformer(
         avg_loss = total_loss / max(n_batches, 1)
         acc = total_correct / max(total_tokens, 1)
 
-        if (epoch + 1) % 5 == 0:
-            print(f"  Epoch {epoch + 1:4d}/{epochs}: loss={avg_loss:.4f}, acc={acc:.3f}")
+        # Validation pass (no grad, no AMP needed — we want consistent fp32 loss)
+        val_loss = None
+        if val_inputs:
+            model.eval()
+            val_total = 0.0
+            val_batches = 0
+            with torch.no_grad():
+                for batch_idxs in make_batches(list(range(len(val_inputs))), batch_size):
+                    max_blen = max(len(val_inputs[i]) for i in batch_idxs)
+                    px = [val_inputs[i] + [PAD_TOKEN] * (max_blen - len(val_inputs[i]))
+                          for i in batch_idxs]
+                    py = [val_targets[i] + [PAD_TOKEN] * (max_blen - len(val_targets[i]))
+                          for i in batch_idxs]
+                    x = torch.tensor(px, dtype=torch.long, device=device)
+                    y = torch.tensor(py, dtype=torch.long, device=device)
+                    logits = model(x)
+                    val_total += F.cross_entropy(
+                        logits.reshape(-1, model.vocab_size),
+                        y.reshape(-1),
+                        ignore_index=PAD_TOKEN,
+                    ).item()
+                    val_batches += 1
+            val_loss = val_total / max(val_batches, 1)
+            model.train()
 
-        if acc > best_acc:
+        if (epoch + 1) % 5 == 0:
+            msg = f"  Epoch {epoch + 1:4d}/{epochs}: loss={avg_loss:.4f}, acc={acc:.3f}"
+            if val_loss is not None:
+                msg += f", val_loss={val_loss:.4f}"
+            print(msg)
+
+        # Checkpoint on best val loss when a val set exists; else best train acc.
+        improved = (val_loss is not None and val_loss < best_val_loss) or \
+                   (val_loss is None and acc > best_acc)
+        if improved:
+            if val_loss is not None:
+                best_val_loss = val_loss
             best_acc = acc
             best_epoch = epoch + 1
+            no_improve = 0
             torch.save({
                 'model_state': model.state_dict(),
                 'architecture': {
@@ -337,12 +399,25 @@ def train_transformer(
                     'weight_bits': 4,
                 },
                 'best_acc': best_acc,
+                'best_val_loss': best_val_loss if val_inputs else None,
                 'best_epoch': best_epoch,
                 'epoch': epoch + 1,
             }, checkpoint_file)
+        else:
+            no_improve += 1
+
+        if patience > 0 and no_improve >= patience:
+            print(f"\nEarly stop at epoch {epoch + 1} (no val improvement for {patience} epochs)")
+            stopped_early = True
+            break
 
     print(f"\nBest acc: {best_acc:.3f} at epoch {best_epoch}")
-    return model
+    return {
+        'model': model,
+        'epochs_run': epoch + 1,
+        'best_val_loss': best_val_loss if val_inputs else None,
+        'stopped_early': stopped_early,
+    }
 
 
 # ─── Generation ─────────────────────────────────────────────────────
@@ -403,6 +478,10 @@ if __name__ == '__main__':
     parser.add_argument('--qat-every', type=int, default=1,
                         help='apply the quantization penalty every N steps (0=off)')
     parser.add_argument('--qat-weight', type=float, default=0.10)
+    parser.add_argument('--val-frac', type=float, default=0.0,
+                        help='fraction of pairs held out for validation (e.g. 0.05)')
+    parser.add_argument('--patience', type=int, default=0,
+                        help='early-stop after N epochs of no val improvement (0=off)')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -450,12 +529,14 @@ if __name__ == '__main__':
         )
         remaining = args.epochs
 
-    model = train_transformer(
+    result = train_transformer(
         model, pairs, epochs=remaining, lr=args.lr,
         device=device, checkpoint_file=args.checkpoint,
         batch_size=args.batch_size, amp=args.amp,
         qat_every=args.qat_every, qat_weight=args.qat_weight,
+        val_frac=args.val_frac, patience=args.patience,
     )
+    model = result['model']
 
     # Test generation
     print("\nSample generations:")
