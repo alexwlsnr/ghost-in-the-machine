@@ -137,12 +137,13 @@ function forward(api, sec, arch, tokens, base) {
     for (let j = 0; j < d; j++)
         lnBuf[j] = emb[lp * d + j];
     api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
-    const zb = f32(oOff, d);
+    const zb = f32(oOff, arch.vocab_size);
     zb.fill(0);
-    const lgOff = oOff + d * 4;
+    const lgOff = oOff + arch.vocab_size * 4; // after bias buffer
     api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
+export { forward as _forward }; // debug
 export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1; // hard context limit of the model
