@@ -105,6 +105,16 @@
     50% { opacity: 0; }
   }
 
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  .thinking {
+    color: #33ff33;
+    animation: pulse 0.8s ease-in-out infinite;
+  }
+
   #status-bar {
     position: absolute;
     bottom: 52px; left: 0; right: 0;
@@ -238,7 +248,14 @@ input.addEventListener('keydown', async (e) => {
   input.disabled = true;
   appendLine(`> ${query.toUpperCase()}`, 'prompt');
 
-  perfInfo.textContent = 'GENERATING...';
+  // Thinking indicator — pulses while model processes the prompt
+  const thinkEl = document.createElement('div');
+  thinkEl.className = 'thinking';
+  thinkEl.textContent = '▌';
+  terminal.appendChild(thinkEl);
+  terminal.scrollTop = terminal.scrollHeight;
+
+  perfInfo.textContent = 'THINKING...';
   let response = '';
   const startTime = performance.now();
   let tokenCount = 0;
@@ -246,6 +263,13 @@ input.addEventListener('keydown', async (e) => {
   try {
     for await (const step of generate(model, query, 80, 0.8)) {
       if (step.done) break;
+
+      // Replace thinking indicator with response on first token
+      if (tokenCount === 0) {
+        thinkEl.remove();
+        perfInfo.textContent = 'GENERATING...';
+      }
+
       response += step.char;
       tokenCount++;
 
@@ -258,6 +282,7 @@ input.addEventListener('keydown', async (e) => {
       }
     }
   } catch(e) {
+    thinkEl.remove();
     appendLine(`ERROR: ${e.message}`, 'error');
   }
 
