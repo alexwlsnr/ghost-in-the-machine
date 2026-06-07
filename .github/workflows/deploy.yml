@@ -1,26 +1,16 @@
-name: Build & Deploy to GitHub Pages
+name: Build & Deploy
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'feature/**', 'fix/**']
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
+  contents: write
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -53,14 +43,20 @@ jobs:
       - name: Verify dist contents
         run: ls -lh dist/
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
+      - name: Determine deploy path
+        id: dest
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ] || [ "${{ github.ref_name }}" = "master" ]; then
+            echo "dir=." >> $GITHUB_OUTPUT
+          else
+            echo "dir=branches/${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: dist
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          destination_dir: ${{ steps.dest.outputs.dir }}
+          keep_files: true
+          commit_message: 'deploy: ${{ github.ref_name }} → ${{ github.sha }}'
