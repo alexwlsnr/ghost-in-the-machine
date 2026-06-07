@@ -173,13 +173,21 @@ export interface Step { char: string; token: number; done: boolean; }
 
 export async function* generate(
   model: Awaited<ReturnType<typeof loadModel>>,
-  prompt: string, maxNew = 80, temp = 0.8,
+  prompt: string, maxNew = 160, temp = 0.8,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
-  let tokens = encode(prompt.toUpperCase()).slice(0, arch.max_len - 1);
+  const win = arch.max_len - 1;            // hard context limit of the model
+  const tokens = encode(prompt.toUpperCase()).slice(0, win);
 
   for (let s = 0; s < maxNew; s++) {
-    if (tokens.length >= arch.max_len - 1) break;
+    // Model can only attend to `win` tokens; beyond that it produces garbage,
+    // so stop cleanly rather than sliding the window.
+    if (tokens.length >= win) { yield { char: '', token: PAD, done: true }; return; }
+
+    // Yield to the browser so it can paint: makes the prompt + thinking
+    // indicator appear immediately, and streams each token as it arrives.
+    await new Promise((r) => setTimeout(r, 0));
+
     const logits = forward(api, sec, arch, tokens, base);
 
     let maxV = -Infinity;

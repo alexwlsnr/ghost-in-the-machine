@@ -205,7 +205,7 @@ function appendLine(text, cls = '') {
 }
 
 async function boot() {
-  appendLine('GHOST IN THE MACHINE v2.5 (build 5)', 'ready');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 7)', 'ready');
   appendLine('Byte-level Tiny Transformer — float32', 'boot');
   appendLine('Kernel: WebAssembly | 256d x 4L x 4H | Weights: 13MB', 'boot');
   appendLine('───────────────────────────────────────────────', 'boot');
@@ -264,7 +264,7 @@ input.addEventListener('keydown', async (e) => {
   let tokenCount = 0;
 
   try {
-    for await (const step of generate(model, query, 80, 0.8)) {
+    for await (const step of generate(model, query, 160, 0.8)) {
       if (step.done) break;
 
       // Replace thinking indicator with response on first token
@@ -283,10 +283,26 @@ input.addEventListener('keydown', async (e) => {
       } else {
         appendLine(response, 'response');
       }
+      terminal.scrollTop = terminal.scrollHeight;
     }
   } catch(e) {
     thinkEl.remove();
     appendLine(`ERROR: ${e.message}`, 'error');
+  }
+
+  // Graceful ending: if we stopped mid-word at the context limit, trim back
+  // to the last sentence boundary (or word) so it doesn't cut off mid-word.
+  if (response && !/[.!?]\s*$/.test(response)) {
+    const lastStop = Math.max(response.lastIndexOf('. '), response.lastIndexOf('! '), response.lastIndexOf('? '));
+    let trimmed = response;
+    if (lastStop > response.length * 0.5) {
+      trimmed = response.slice(0, lastStop + 1);          // keep the punctuation
+    } else {
+      const lastSpace = response.lastIndexOf(' ');
+      if (lastSpace > 0) trimmed = response.slice(0, lastSpace) + '…';
+    }
+    const respEl = Array.from(terminal.children).reverse().find(c => c.className === 'response');
+    if (respEl) respEl.textContent = trimmed;
   }
 
   const elapsed = performance.now() - startTime;
