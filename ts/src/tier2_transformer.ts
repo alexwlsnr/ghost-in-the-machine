@@ -16,6 +16,7 @@ interface WasmApi {
 }
 
 const PAD = 256;
+const EOS = 257;
 
 async function fetchBuf(url: string): Promise<ArrayBuffer> {
   const r = await fetch(url);
@@ -198,7 +199,7 @@ export async function* generate(
     let r = Math.random() * sum, next = 0;
     for (let i = 0; i < arch.vocab_size; i++) { r -= probs[i]; if (r <= 0) { next = i; break; } }
 
-    if (next === PAD) { yield { char: '', token: next, done: true }; return; }
+    if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
     tokens.push(next);
     yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
   }

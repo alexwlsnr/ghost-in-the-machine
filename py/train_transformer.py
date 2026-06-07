@@ -16,8 +16,9 @@ from typing import List, Tuple
 
 # ─── Constants ─────────────────────────────────────────────────────
 
-VOCAB_SIZE = 257  # bytes 0-255 + PAD token
+VOCAB_SIZE = 258  # bytes 0-255 + PAD_TOKEN (256) + EOS_TOKEN (257)
 PAD_TOKEN = 256
+EOS_TOKEN = 257
 DEFAULT_MAX_LEN = 64
 
 
@@ -42,7 +43,7 @@ class TinyTransformer(nn.Module):
         self.d_ff = d_ff
         self.max_len = max_len
 
-        self.token_embed = nn.Embedding(vocab_size, d_model, padding_idx=PAD_TOKEN)
+        self.token_embed = nn.Embedding(vocab_size, d_model)
         self.pos_embed = nn.Embedding(max_len, d_model)
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -191,11 +192,11 @@ def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN) -> 
     if len(full) >= max_len:
         full = full[:max_len - 1]
 
-    # Input: full sequence (model sees this)
-    inp = full + [PAD_TOKEN]
+    # Input: full sequence + EOS (model sees this)
+    inp = full + [EOS_TOKEN]
 
-    # Target: predict next token (shifted), pad at end
-    tgt = full[1:] + [PAD_TOKEN, PAD_TOKEN]
+    # Target: predict next token (shifted left), EOS marks end, PAD fills remainder
+    tgt = full[1:] + [EOS_TOKEN, PAD_TOKEN]
     tgt = tgt[:len(inp)]
 
     return inp, tgt
@@ -341,7 +342,7 @@ def generate(
         probs = F.softmax(next_logits, dim=-1)
         next_token = torch.multinomial(probs, 1).item()
 
-        if next_token == PAD_TOKEN:
+        if next_token == EOS_TOKEN or next_token == PAD_TOKEN:
             break
         tokens.append(next_token)
         if len(tokens) >= model.max_len:
