@@ -223,9 +223,14 @@ def train_transformer(
     amp: bool = False,
     qat_every: int = 1,
     qat_weight: float = 0.10,
+    preserve_case: bool = False,
 ):
     print(f"Device: {device}")
     print(f"Training on {len(pairs)} pairs, {epochs} epochs")
+    if preserve_case:
+        print("Case: preserved (--preserve-case enabled)")
+    else:
+        print("Case: uppercased (default)")
 
     model = model.to(device)
     model.train()
@@ -236,7 +241,10 @@ def train_transformer(
     for q, r in pairs:
         if not q or not r:
             continue
-        inp, tgt = make_sequence(q.upper().strip(), r.upper().strip(), model.max_len)
+        if preserve_case:
+            inp, tgt = make_sequence(q.strip(), r.strip(), model.max_len)
+        else:
+            inp, tgt = make_sequence(q.upper().strip(), r.upper().strip(), model.max_len)
         if len(inp) >= 4:  # need at least a few tokens
             all_inputs.append(inp)
             all_targets.append(tgt)
@@ -354,13 +362,17 @@ def generate(
     max_new: int = 60,
     temperature: float = 0.8,
     device: str = 'cpu',
+    preserve_case: bool = False,
 ) -> str:
     model.eval()
     model = model.to(device)
 
     # Cap the prompt at the context window (mirrors the TS orchestrator). The old
     # `[:max_len - max_new]` silently dropped prompt bytes (e.g. "HELLO" → "HELL").
-    tokens = encode(prompt.upper())[:model.max_len - 1]
+    if preserve_case:
+        tokens = encode(prompt)[:model.max_len - 1]
+    else:
+        tokens = encode(prompt.upper())[:model.max_len - 1]
     prompt_len = len(tokens)
 
     for _ in range(max_new):
@@ -403,6 +415,15 @@ if __name__ == '__main__':
     parser.add_argument('--qat-every', type=int, default=1,
                         help='apply the quantization penalty every N steps (0=off)')
     parser.add_argument('--qat-weight', type=float, default=0.10)
+    parser.add_argument('--val-frac', type=float, default=0.0,
+                        help='fraction of pairs held out for validation (0=disabled)')
+    parser.add_argument('--patience', type=int, default=0,
+                        help='early-stopping patience in epochs (0=disabled)')
+    parser.add_argument('--status-file', type=str, default=None,
+                        help='write training status JSON to this path each epoch')
+    parser.add_argument('--preserve-case', action='store_true',
+                        help='keep original case in training and generation '
+                             '(default: uppercase everything for backward compat)')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -455,10 +476,16 @@ if __name__ == '__main__':
         device=device, checkpoint_file=args.checkpoint,
         batch_size=args.batch_size, amp=args.amp,
         qat_every=args.qat_every, qat_weight=args.qat_weight,
+        preserve_case=args.preserve_case,
     )
 
     # Test generation
     print("\nSample generations:")
-    for prompt in ['HELLO', 'HOW ARE YOU', 'TELL ME A JOKE', 'WHO ARE YOU', 'THANKS']:
-        out = generate(model, prompt, 50, temperature=0.8, device=device)
+    if args.preserve_case:
+        sample_prompts = ['hello', 'how are you', 'tell me a joke', 'who are you', 'thanks']
+    else:
+        sample_prompts = ['HELLO', 'HOW ARE YOU', 'TELL ME A JOKE', 'WHO ARE YOU', 'THANKS']
+    for prompt in sample_prompts:
+        out = generate(model, prompt, 50, temperature=0.8, device=device,
+                       preserve_case=args.preserve_case)
         print(f"  {prompt:20s} → {out}")
