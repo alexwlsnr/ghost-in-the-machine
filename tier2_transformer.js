@@ -143,7 +143,6 @@ function forward(api, sec, arch, tokens, base) {
     api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
-export { forward as _forward }; // debug
 export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1; // hard context limit of the model
