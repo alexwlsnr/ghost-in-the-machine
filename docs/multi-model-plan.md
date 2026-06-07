@@ -12,42 +12,82 @@ All byte-level, vocab=258 (bytes 0-255 + PAD + EOS), pre-norm, ReLU FFN, learned
 
 ## Training strategy
 
-### Data expansion needed
+### Teacher model: gemma4-e2b-distill
+
+Tested llama3.2-3b vs gemma4-e2b-distill (50-pair sample, 16 workers):
+
+| Metric | llama3.2-3b | gemma4-e2b-distill |
+|--------|-------------|-------------------|
+| Valid pairs | 46/50 (92%) | 44/50 (88%) |
+| Time (50 pairs) | 1.5s | 4.7s |
+| Per-call latency | ~0.23s | ~0.30s |
+| Conversational quality | Reflexive, asks questions back | Natural, empathetic |
+| Deflection rate | High ("WHAT'S ON YOUR MIND?") | Low ("GREAT!", "NO WORRIES!") |
+
+**Verdict: gemma4-e2b-distill wins on quality.** Slightly slower per call but
+the conversational naturalness is dramatically better. With system prompt
+support, it follows behavior instructions reliably.
+
+### System prompt architecture
+
+The critical insight: using the OpenAI `system` role instead of embedding
+instructions in user messages makes the model *obey* behavioral constraints.
+Tested and validated prompt:
+
+```
+You are a friendly, helpful AI assistant having a natural conversation.
+Keep responses short (1-2 sentences, under 100 characters).
+Match the user's tone — casual for casual, brief for brief.
+Never ask follow-up questions. Never repeat the user's words back.
+Just respond directly and naturally, like a real chat.
+```
+
+Key behavioral rules that fix llama3.2-3b's reflexive question-flipping:
+- **"Never ask follow-up questions"** — prevents "HOW ARE YOU?" → "I'M GOOD, HOW ARE YOU?" loops
+- **"Never repeat the user's words back"** — prevents "I NEED HELP" → "WHAT DO YOU NEED HELP WITH?"
+
+Response generation uses a clean user template:
+```
+Respond to: {query}
+```
+
+### Data expansion pipeline
+
 Current: 2K pairs — fine for 3.3M params, way too little for 11M/57M.
 Target: 5K+ pairs for Wisp retrain, 50K+ for Shade, 200K+ for Specter.
 
-**Approach: Template-driven + Llama completion**
+**Approach: Template-driven seed generation + gemma4-e2b-distill for responses**
 
-Wisp is NOT reliable enough for prompt generation (tested — ~50% garbage at 3.3M/2K).
-Instead, use a deterministic two-stage pipeline:
+Wisp is NOT used for prompt generation (tested — ~50% garbage at 3.3M/2K).
+Instead, prompts come from deterministic templates, and gemma4-e2b-distill
+provides all responses via the system-prompt pipeline above.
 
-1. **Template seed bank** — hand-write ~200 prompt templates covering categories:
-   conversation, Q&A, jokes, recommendations, facts, creative, code, math, how-to
-   Example: "Tell me a joke about {topic}", "How do I {verb} a {noun}",
-   "What is the capital of {country}", "Recommend a {category} for {occasion}"
+1. **Template seed bank** — hand-write ~200 prompt templates across 10 categories:
+   conversation, Q&A, jokes, recommendations, facts, creative, how-to, opinions,
+   goodbyes, meta. Example: "Tell me a joke about {topic}",
+   "How do I {verb} a {noun}", "What is the capital of {country}"
 
-2. **Template expansion** — Llama expands the 200 templates to 2,000 by:
-   "Here are 5 prompt templates for a chatbot: [examples]. Generate 20 more
-   on different topics. Be creative. Output one per line."
+2. **Template expansion** — gemma4-e2b-distill expands 200 → 2,000 templates.
+   Prompt: "Here are 5 chatbot prompt templates: [examples]. Generate 20 more
+   on different topics. Output one per line."
 
 3. **Slot filling** — for each template, randomly sample from word lists
-   (topics, verbs, countries, categories, etc.) to produce 5K-10K seed prompts
+   (100 topics, 200 verbs, 150 countries, etc.) to produce 5K-10K unique seed
+   prompts
 
-4. **Diversity pass** — feed seed prompts to Llama with: "Given this prompt
-   template: '{template}', generate 5 different variations that a real user
-   might ask." → 25K-50K prompts from 5K seeds
+4. **Diversity pass** — for each seed prompt, gemma4-e2b-distill generates
+   5 natural variations: "Given the prompt '{prompt}', generate 5 different
+   ways a real user might phrase this." → 25K-50K distinct prompts
 
-5. **Response generation** — feed all prompts to Llama 3.2 3B:
-   "You are a helpful AI assistant. Respond naturally to: {prompt}"
-   Collect prompt|response pairs
+5. **Response generation** — feed all prompts through gemma4-e2b-distill
+   with the system prompt above. Collect prompt|response pairs.
 
-This is entirely Llama-driven after step 1-3 (deterministic template filling).
-No tiny-model prompt generation. Total Llama calls:
-- Step 2: ~1 call (batch)
-- Step 4: 5K calls (one per seed prompt)  
+All intelligence steps (2, 4, 5) run through gemma4-e2b-distill with
+16-64 parallel workers. Total gemma4-e2b-distill calls:
+- Step 2: ~1 call (batch template generation)
+- Step 4: 10K calls (one per seed prompt, 5 outputs each)
 - Step 5: 50K calls (one per final prompt)
-
-At ~1s per Llama call, ~55K calls = ~15 hours. Feasible overnight.
+- **Total: ~60K calls, ~5 hours at 16 workers (~0.3s/call)**
 
 ### Training configs
 
