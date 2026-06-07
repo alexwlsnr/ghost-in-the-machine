@@ -332,8 +332,10 @@ def generate(
     model.eval()
     model = model.to(device)
 
-    tokens = encode(prompt.upper())
-    tokens = tokens[:model.max_len - max_new]
+    # Cap the prompt at the context window (mirrors the TS orchestrator). The old
+    # `[:max_len - max_new]` silently dropped prompt bytes (e.g. "HELLO" → "HELL").
+    tokens = encode(prompt.upper())[:model.max_len - 1]
+    prompt_len = len(tokens)
 
     for _ in range(max_new):
         x = torch.tensor([tokens], dtype=torch.long, device=device)
@@ -348,8 +350,7 @@ def generate(
         if len(tokens) >= model.max_len:
             break
 
-    # Return only the generated portion (after the prompt)
-    prompt_len = len(encode(prompt.upper()))
+    # Return only the generated portion (after the prompt tokens we kept).
     return decode(tokens[prompt_len:])
 
 
