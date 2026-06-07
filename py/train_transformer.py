@@ -223,13 +223,15 @@ def split_pairs(pairs, val_frac: float, seed: int = 0):
     return train, val
 
 
-def _build_sequences(pairs, max_len: int):
+def _build_sequences(pairs, max_len: int, preserve_case: bool = False):
     """Tokenize pairs into (inputs, targets), dropping empty / too-short ones."""
     inputs, targets = [], []
     for q, r in pairs:
         if not q or not r:
             continue
-        inp, tgt = make_sequence(q.upper().strip(), r.upper().strip(), max_len)
+        q_norm = q.strip() if preserve_case else q.upper().strip()
+        r_norm = r.strip() if preserve_case else r.upper().strip()
+        inp, tgt = make_sequence(q_norm, r_norm, max_len)
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -257,6 +259,7 @@ def train_transformer(
     val_frac: float = 0.0,
     patience: int = 0,
     status_file: Optional[str] = None,
+    preserve_case: bool = False,
 ):
     """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
     # Lazy-import supervision emitter — no hard dep when not used.
@@ -282,8 +285,8 @@ def train_transformer(
     model.train()
 
     train_pairs, val_pairs = split_pairs(pairs, val_frac)
-    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len)
-    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len)
+    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case)
+    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case)
 
     print(f"Sequences — train: {len(all_inputs)}, val: {len(val_inputs)}")
     total_params = sum(p.numel() for p in model.parameters())
@@ -473,13 +476,15 @@ def generate(
     max_new: int = 60,
     temperature: float = 0.8,
     device: str = 'cpu',
+    preserve_case: bool = False,
 ) -> str:
     model.eval()
     model = model.to(device)
 
     # Cap the prompt at the context window (mirrors the TS orchestrator). The old
     # `[:max_len - max_new]` silently dropped prompt bytes (e.g. "HELLO" → "HELL").
-    tokens = encode(prompt.upper())[:model.max_len - 1]
+    prompt_norm = prompt if preserve_case else prompt.upper()
+    tokens = encode(prompt_norm)[:model.max_len - 1]
     prompt_len = len(tokens)
 
     for _ in range(max_new):
@@ -528,6 +533,8 @@ if __name__ == '__main__':
                         help='early-stop after N epochs of no val improvement (0=off)')
     parser.add_argument('--status-file', type=str, default=None,
                         help='path to write status.json each epoch (supervision harness)')
+    parser.add_argument('--preserve-case', action='store_true',
+                        help='disable uppercase normalization (required for Wraith/technical models)')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -582,6 +589,7 @@ if __name__ == '__main__':
         qat_every=args.qat_every, qat_weight=args.qat_weight,
         val_frac=args.val_frac, patience=args.patience,
         status_file=args.status_file,
+        preserve_case=args.preserve_case,
     )
     model = result['model']
 
