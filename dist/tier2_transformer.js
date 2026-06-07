@@ -159,10 +159,182 @@ export function forward(api, sec, arch, tokens, base) {
     api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
-export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random) {
+export function createCache(model) {
+    const { manifest: arch } = model;
+    const size = arch.max_len * arch.d_model;
+    return {
+        length: 0,
+        k: Array.from({ length: arch.n_layers }, () => new Float32Array(size)),
+        v: Array.from({ length: arch.n_layers }, () => new Float32Array(size)),
+    };
+}
+// ─── Incremental Forward (KV Cache path) ───────────────────────────
+/**
+ * Single-token incremental forward using a KV cache.
+ * Computes logits for position `pos` (0-indexed), updating the cache.
+ * The cache must already contain filled entries for positions 0..pos-1.
+ *
+ * On entry: cache.length === pos
+ * On exit:  cache.length === pos + 1
+ */
+function forwardIncremental(api, sec, arch, token, pos, base, cache) {
+    const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
+    const mem = api.memory;
+    const S = (name) => base + sec[name].offset;
+    // Scratch positioned after all weight sections, same convention as forward().
+    let off = base;
+    for (const s of Object.values(sec))
+        off = Math.max(off, base + s.offset + s.size);
+    off = (off + 15) & ~15;
+    const ba = (n) => { const o = off; off = (off + n * 4 + 15) & ~15; return o; };
+    const f32 = (o, n) => new Float32Array(mem.buffer, o, n);
+    // Fixed scratch buffers allocated before the layer loop.
+    const xOff = ba(d); // current hidden state for the single new position
+    const qOff = ba(d); // Q vector for the new position
+    const kvOff = ba(d); // temp K or V vector, written to cache then reused
+    const aOff = ba(d); // attention output vector
+    const seqLen = pos + 1;
+    const scOff = ba(seqLen); // attention scores: Q[pos] attends to 0..pos
+    const lOff = ba(d); // temp for layernorm / ffn output
+    const oOff = ba(arch.vocab_size * 2); // zero-bias buffer + logits
+    // 1. Embedding: token + positional
+    const teW = f32(S('token_embed'), arch.vocab_size * d);
+    const peW = f32(S('pos_embed'), arch.max_len * d);
+    const xVec = f32(xOff, d);
+    for (let j = 0; j < d; j++)
+        xVec[j] = teW[token * d + j] + peW[pos * d + j];
+    // 2. Layers
+    for (let li = 0; li < nl; li++) {
+        const pfx = `enc${li}`;
+        const cacheK = cache.k[li]; // Float32Array [max_len * d]
+        const cacheV = cache.v[li];
+        // ── Attention sub-layer ──────────────────────────────────────────
+        // 2a. LayerNorm of x → lOff
+        const lnBuf = f32(lOff, d);
+        lnBuf.set(f32(xOff, d));
+        api.layer_norm_f32(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`), d, 1e-5);
+        // 2b. Q/K/V for position pos
+        api.matmul_f32w(S(`${pfx}_q_weight`), S(`${pfx}_q_bias`), lOff, qOff, d, d);
+        api.matmul_f32w(S(`${pfx}_k_weight`), S(`${pfx}_k_bias`), lOff, kvOff, d, d);
+        cacheK.set(f32(kvOff, d), pos * d); // Store K[pos] into cache
+        api.matmul_f32w(S(`${pfx}_v_weight`), S(`${pfx}_v_bias`), lOff, kvOff, d, d);
+        cacheV.set(f32(kvOff, d), pos * d); // Store V[pos] into cache
+        // 2c. Multi-head attention: Q[pos] attends to K[0..pos], V[0..pos]
+        const attn = f32(aOff, d);
+        attn.fill(0);
+        const scores = f32(scOff, seqLen);
+        const q = f32(qOff, d);
+        for (let h = 0; h < nh; h++) {
+            const ho = h * dh;
+            // Dot products: Q[pos, h] · K[kj, h] for kj = 0..pos
+            for (let kj = 0; kj < seqLen; kj++) {
+                let dot = 0;
+                for (let xi = 0; xi < dh; xi++)
+                    dot += q[ho + xi] * cacheK[kj * d + ho + xi];
+                scores[kj] = dot / Math.sqrt(dh);
+            }
+            // Softmax over seqLen positions (all kj <= pos, no causal masking needed)
+            api.softmax_f32(scOff, seqLen);
+            // Weighted sum over V
+            for (let xi = 0; xi < dh; xi++) {
+                let val = 0;
+                for (let kj = 0; kj < seqLen; kj++)
+                    val += scores[kj] * cacheV[kj * d + ho + xi];
+                attn[ho + xi] = val;
+            }
+        }
+        // 2d. Output projection + residual
+        api.matmul_f32w(S(`${pfx}_o_weight`), S(`${pfx}_o_bias`), aOff, lOff, d, d);
+        const lVec = f32(lOff, d);
+        for (let j = 0; j < d; j++)
+            xVec[j] += lVec[j];
+        // ── FFN sub-layer ────────────────────────────────────────────────
+        // 2e. LayerNorm of x → lOff
+        lnBuf.set(f32(xOff, d));
+        api.layer_norm_f32(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`), d, 1e-5);
+        // 2f. ff1 (d -> d_ff), ReLU, ff2 (d_ff -> lOff as output).
+        // ffOff is bump-allocated inside the layer loop; monotone bump means no aliasing.
+        const ffOff = ba(arch.d_ff);
+        api.matmul_f32w(S(`${pfx}_ff1_weight`), S(`${pfx}_ff1_bias`), lOff, ffOff, d, arch.d_ff);
+        api.relu_f32(ffOff, arch.d_ff);
+        api.matmul_f32w(S(`${pfx}_ff2_weight`), S(`${pfx}_ff2_bias`), ffOff, lOff, arch.d_ff, d);
+        // 2g. Residual add
+        for (let j = 0; j < d; j++)
+            xVec[j] += lVec[j];
+    }
+    // 3. Final LN + head
+    const lnFinal = f32(lOff, d);
+    lnFinal.set(f32(xOff, d));
+    api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
+    const zb = f32(oOff, arch.vocab_size);
+    zb.fill(0);
+    const lgOff = oOff + arch.vocab_size * 4;
+    api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
+    cache.length = pos + 1;
+    return f32(lgOff, arch.vocab_size);
+}
+/**
+ * Prefill the KV cache by running forwardIncremental() over each prompt token.
+ * Returns the logits for the last prompt position (seeds the first sampled token).
+ * cache.length will equal tokens.length after this returns.
+ */
+function prefill(api, sec, arch, tokens, base, cache) {
+    cache.length = 0;
+    let logits;
+    for (let p = 0; p < tokens.length; p++) {
+        logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache);
+    }
+    return logits;
+}
+export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1; // hard context limit of the model
     const tokens = encode(prompt.toUpperCase()).slice(0, win);
+    // -- Cached path ----------------------------------------------------
+    if (cache !== undefined) {
+        cache.length = 0;
+        // Prefill: run incremental forward over all prompt tokens, populating the cache.
+        let logits = prefill(api, sec, arch, tokens, base, cache);
+        const sample = (lg) => {
+            let maxV = -Infinity;
+            for (let i = 0; i < arch.vocab_size; i++)
+                if (lg[i] > maxV)
+                    maxV = lg[i];
+            let sum = 0;
+            const probs = new Float64Array(arch.vocab_size);
+            for (let i = 0; i < arch.vocab_size; i++) {
+                probs[i] = Math.exp((lg[i] - maxV) / temp);
+                sum += probs[i];
+            }
+            let r = rand() * sum, next = 0;
+            for (let i = 0; i < arch.vocab_size; i++) {
+                r -= probs[i];
+                if (r <= 0) {
+                    next = i;
+                    break;
+                }
+            }
+            return next;
+        };
+        for (let s = 0; s < maxNew; s++) {
+            if (cache.length >= win) {
+                yield { char: '', token: PAD, done: true };
+                return;
+            }
+            await new Promise((r) => setTimeout(r, 0));
+            const next = sample(logits);
+            if (next === EOS || next === PAD) {
+                yield { char: '', token: next, done: true };
+                return;
+            }
+            yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
+            // Advance: run incremental forward for the new token at the next position.
+            logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
+        }
+        yield { char: '', token: PAD, done: true };
+        return;
+    }
+    // -- Full-recompute path (no cache -- backward compatible) ----------
     for (let s = 0; s < maxNew; s++) {
         // Model can only attend to `win` tokens; beyond that it produces garbage,
         // so stop cleanly rather than sliding the window.
