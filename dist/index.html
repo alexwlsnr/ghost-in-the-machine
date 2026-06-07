@@ -205,7 +205,7 @@ function appendLine(text, cls = '') {
 }
 
 async function boot() {
-  appendLine('GHOST IN THE MACHINE v2.5 (build 7)', 'ready');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 8)', 'ready');
   appendLine('Byte-level Tiny Transformer — float32', 'boot');
   appendLine('Kernel: WebAssembly | 256d x 4L x 4H | Weights: 13MB', 'boot');
   appendLine('───────────────────────────────────────────────', 'boot');
@@ -306,8 +306,8 @@ input.addEventListener('keydown', async (e) => {
   }
 
   const elapsed = performance.now() - startTime;
-  const msPerToken = tokenCount > 0 ? (elapsed / tokenCount).toFixed(1) : 0;
-  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${msPerToken}ms/tok)`;
+  const tokPerSec = elapsed > 0 ? (tokenCount * 1000 / elapsed).toFixed(1) : 0;
+  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)`;
 
   input.disabled = false;
   input.focus();
