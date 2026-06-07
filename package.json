@@ -9,6 +9,6 @@
     "build": "npm run build:wasm && npm run build:ts",
     "fixtures": ".venv/bin/python3 test/gen_parity_fixtures.py",
     "test": "npm run build && node --test test/*.test.js",
-    "test:py": ".venv/bin/python3 test/test_generate.py"
+    "test:py": ".venv/bin/python3 -m unittest discover -s test -p 'test_*.py'"
   }
 }
