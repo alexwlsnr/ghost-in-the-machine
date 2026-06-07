@@ -22,6 +22,8 @@
     width: 100vw;
     height: 100vh;
     background: #0c0c0c;
+    display: flex;
+    flex-direction: column;
     position: relative;
     box-shadow: inset 0 0 60px rgba(0,0,0,0.8);
   }
@@ -41,8 +43,7 @@
   }
 
   #terminal {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 52px;
+    flex: 1 1 auto;
     padding: 24px;
     overflow-y: auto;
     font-size: 24px;
@@ -59,9 +60,7 @@
   #terminal .stats { color: #555; font-size: 18px; }
 
   #input-line {
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 52px;
+    flex: 0 0 52px;
     display: flex;
     align-items: center;
     padding: 0 24px;
@@ -116,9 +115,7 @@
   }
 
   #status-bar {
-    position: absolute;
-    bottom: 52px; left: 0; right: 0;
-    height: 26px;
+    flex: 0 0 26px;
     background: #33ff3311;
     display: flex;
     align-items: center;
@@ -181,7 +178,7 @@
 </div>
 
 <script type="module">
-import { loadModel, encode, generate } from './tier2_transformer.js?v=4';
+import { loadModel, encode, generate } from './tier2_transformer.js?v=5';
 
 const terminal = document.getElementById('terminal');
 const input = document.getElementById('query-input');
@@ -202,7 +199,7 @@ function appendLine(text, cls = '') {
 }
 
 async function boot() {
-  appendLine('GHOST IN THE MACHINE v2.5', 'ready');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 4)', 'ready');
   appendLine('Byte-level Tiny Transformer — float32', 'boot');
   appendLine('Kernel: WebAssembly | 256d x 4L x 4H | Weights: 13MB', 'boot');
   appendLine('───────────────────────────────────────────────', 'boot');
@@ -212,9 +209,9 @@ async function boot() {
 
   try {
     model = await loadModel({
-      wasm: './tier2_kernel.wasm?v=4',
-      bin: './transformer_model.bin?v=4',
-      json: './transformer_model.json?v=4',
+      wasm: './tier2_kernel.wasm?v=5',
+      bin: './transformer_model.bin?v=5',
+      json: './transformer_model.json?v=5',
     });
   } catch(e) {
     appendLine(`LOAD ERROR: ${e.message}`, 'error');
