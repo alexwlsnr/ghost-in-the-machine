@@ -13,6 +13,11 @@ export async function loadModel(urls) {
     const [wasmBuf, binBuf, jsonBuf] = await Promise.all([
         fetchBuf(urls.wasm), fetchBuf(urls.bin), fetchBuf(urls.json),
     ]);
+    return instantiateModel(wasmBuf, binBuf, jsonBuf);
+}
+// Construct a model from already-loaded buffers (no fetch). Split out of loadModel
+// so the forward pass can be driven under Node for parity tests.
+export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const wasm = await WebAssembly.instantiate(wasmBuf);
     const api = wasm.instance.exports;
     const manifest = JSON.parse(new TextDecoder().decode(jsonBuf));
@@ -47,7 +52,7 @@ export function encode(text) {
     return t;
 }
 // ─── Forward ───────────────────────────────────────────────────────
-function forward(api, sec, arch, tokens, base) {
+export function forward(api, sec, arch, tokens, base) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
     // Section pointer helper: actual address = base + manifest offset
     const S = (name) => base + sec[name].offset;
@@ -65,8 +70,8 @@ function forward(api, sec, arch, tokens, base) {
     const aOff = ba(seq * d);
     const oOff = ba(arch.vocab_size + d);
     // 1. Embedding
-    const teW = f32(S('token_embed'), 257 * d);
-    const peW = f32(S('pos_embed'), 64 * d);
+    const teW = f32(S('token_embed'), arch.vocab_size * d);
+    const peW = f32(S('pos_embed'), arch.max_len * d);
     const emb = f32(eOff, seq * d);
     for (let p = 0; p < seq; p++) {
         const tid = tokens[p];
@@ -143,7 +148,7 @@ function forward(api, sec, arch, tokens, base) {
     api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
-export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
+export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1; // hard context limit of the model
     const tokens = encode(prompt.toUpperCase()).slice(0, win);
@@ -168,7 +173,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8) {
             probs[i] = Math.exp((logits[i] - maxV) / temp);
             sum += probs[i];
         }
-        let r = Math.random() * sum, next = 0;
+        let r = rand() * sum, next = 0;
         for (let i = 0; i < arch.vocab_size; i++) {
             r -= probs[i];
             if (r <= 0) {

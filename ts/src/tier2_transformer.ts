@@ -28,6 +28,12 @@ export async function loadModel(urls: { wasm: string; bin: string; json: string 
   const [wasmBuf, binBuf, jsonBuf] = await Promise.all([
     fetchBuf(urls.wasm), fetchBuf(urls.bin), fetchBuf(urls.json),
   ]);
+  return instantiateModel(wasmBuf, binBuf, jsonBuf);
+}
+
+// Construct a model from already-loaded buffers (no fetch). Split out of loadModel
+// so the forward pass can be driven under Node for parity tests.
+export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffer, jsonBuf: ArrayBuffer) {
   const wasm = await WebAssembly.instantiate(wasmBuf);
   const api = wasm.instance.exports as unknown as WasmApi;
   const manifest = JSON.parse(new TextDecoder().decode(jsonBuf)) as {
@@ -67,7 +73,7 @@ export function encode(text: string): number[] {
 
 // ─── Forward ───────────────────────────────────────────────────────
 
-function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
+export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
 
   // Section pointer helper: actual address = base + manifest offset
@@ -89,8 +95,8 @@ function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, toke
   const oOff = ba(arch.vocab_size + d);
 
   // 1. Embedding
-  const teW = f32(S('token_embed'), 257 * d);
-  const peW = f32(S('pos_embed'), 64 * d);
+  const teW = f32(S('token_embed'), arch.vocab_size * d);
+  const peW = f32(S('pos_embed'), arch.max_len * d);
   const emb = f32(eOff, seq * d);
   for (let p = 0; p < seq; p++) {
     const tid = tokens[p];
@@ -174,7 +180,7 @@ export interface Step { char: string; token: number; done: boolean; }
 
 export async function* generate(
   model: Awaited<ReturnType<typeof loadModel>>,
-  prompt: string, maxNew = 160, temp = 0.8,
+  prompt: string, maxNew = 160, temp = 0.8, rand: () => number = Math.random,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
   const win = arch.max_len - 1;            // hard context limit of the model
@@ -196,7 +202,7 @@ export async function* generate(
     let sum = 0;
     const probs = new Float64Array(arch.vocab_size);
     for (let i = 0; i < arch.vocab_size; i++) { probs[i] = Math.exp((logits[i] - maxV) / temp); sum += probs[i]; }
-    let r = Math.random() * sum, next = 0;
+    let r = rand() * sum, next = 0;
     for (let i = 0; i < arch.vocab_size; i++) { r -= probs[i]; if (r <= 0) { next = i; break; } }
 
     if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
