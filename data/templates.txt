@@ -1,0 +1,231 @@
+# Ghost in the Machine — prompt template seed bank
+# 200 templates across 9 categories. One per line.
+# {slot} types: {topic} {verb} {noun} {country} {genre} {occasion}
+# Lines starting with # are comments and are skipped by expand_data.py.
+
+# ── Conversation (30) ────────────────────────────────────────────────
+
+Hey, how's it going?
+What's up?
+How are you doing today?
+I'm feeling a bit down today.
+I had the best day ever.
+I'm bored, talk to me.
+Do you ever get tired of answering questions?
+What's your favourite thing to talk about?
+I could really use some cheering up right now.
+Tell me something interesting about {topic}.
+What do you think makes a good conversation?
+I just got back from {country} and I'm exhausted.
+I feel like nobody listens to me sometimes.
+Do you have a personality?
+I'm in a great mood today, honestly.
+What's something that always makes you smile?
+I don't really know what I want to talk about.
+Can you just chat with me for a bit?
+I'm trying to be more positive lately.
+Honestly I'm just procrastinating right now.
+Do you ever feel curious about {topic}?
+What would you say to someone having a rough week?
+I'm feeling pretty nostalgic today.
+Do you prefer talking about serious stuff or fun stuff?
+I've been thinking a lot about {topic} lately.
+I just need someone to talk to.
+What's the nicest thing someone could say to you?
+I'm nervous about something and I don't know why.
+Tell me your honest opinion on {topic}.
+Is there anything you genuinely enjoy?
+
+# ── Q&A / Facts (30) ────────────────────────────────────────────────
+
+What is the capital of {country}?
+Which country is known for the Eiffel Tower?
+Who invented the telephone?
+What is the largest ocean on Earth?
+How many continents are there?
+What language is spoken in {country}?
+Who wrote Romeo and Juliet?
+What year did World War II end?
+What is the speed of light?
+Which planet is closest to the Sun?
+How long does it take light to reach Earth from the Sun?
+What is the most widely spoken language in the world?
+Who painted the Mona Lisa?
+What is the tallest mountain on Earth?
+Which country has the largest population?
+What animal is the symbol of {country}?
+How many bones are in the human body?
+What is the currency used in {country}?
+Who was the first person to walk on the Moon?
+What is the chemical symbol for gold?
+Which ocean is the deepest?
+What is the longest river in the world?
+Who discovered penicillin?
+What does DNA stand for?
+Which country is famous for sushi?
+What is the smallest country in the world?
+How many stars are approximately in the Milky Way?
+What is the hardest natural substance on Earth?
+Who wrote the Harry Potter series?
+What is the boiling point of water?
+
+# ── Jokes & Humor (20) ──────────────────────────────────────────────
+
+Tell me a joke about {topic}.
+Do you know any good puns?
+Make me laugh, please.
+Give me your best knock-knock joke.
+What's a funny fact about {topic}?
+Tell me something ridiculous about {noun}.
+I need a good riddle.
+Why did the {noun} cross the road?
+Tell me a short funny story.
+What's the most absurd thing you can imagine?
+Do you know any jokes about {country}?
+Give me a one-liner.
+What's a good joke for a {occasion}?
+Tell me a pun about {topic}.
+Can you make up a silly joke right now?
+What's something funny that almost nobody knows?
+Tell me a clean joke I can share with my family.
+What would a {noun} say if it could talk?
+Make up a ridiculous fact about {topic}.
+What's the funniest word you know?
+
+# ── Recommendations (25) ─────────────────────────────────────────────
+
+Can you recommend a good {genre} movie?
+What's a great {genre} book I should read?
+Suggest a song for a {occasion}.
+What's a good restaurant dish to try for a {occasion}?
+Recommend something fun to do on a rainy day.
+What's a good gift idea for a {occasion}?
+Can you suggest a {genre} TV show?
+What's an underrated {genre} film I might have missed?
+Recommend a {genre} podcast.
+What's a good activity for a {occasion}?
+Suggest a travel destination in {country}.
+What's a great album to listen to when I'm feeling down?
+Recommend a quick recipe for a weeknight dinner.
+What's a fun hobby to pick up?
+Can you suggest a {genre} book for someone who doesn't read much?
+What's a good movie to watch alone on a Friday night?
+Recommend something relaxing to do after a stressful week.
+What's a good gift for someone who has everything?
+Suggest a {genre} song that always lifts your mood.
+What's a hidden gem in {country} worth visiting?
+Recommend a board game for a {occasion}.
+What's a good {genre} movie for a {occasion}?
+Can you suggest an activity for a first date?
+What's a great snack to make at home?
+Recommend something to watch with the whole family.
+
+# ── How-to (25) ──────────────────────────────────────────────────────
+
+How do I {verb} a {noun}?
+What's the best way to {verb} quickly?
+Can you explain how to make pasta from scratch?
+How do I get better at {topic}?
+What's a simple trick for remembering things?
+How do I {verb} without any experience?
+What are some tips for staying organised?
+How do I apologise sincerely to someone?
+What's the easiest way to learn a new {topic}?
+How do I start a conversation with a stranger?
+Can you walk me through how to {verb} a {noun}?
+What's a good way to deal with stress?
+How do I make new friends as an adult?
+What should I do if I want to {verb} more often?
+How do I stay motivated when things get hard?
+What are some good habits to build in the morning?
+How do I {verb} without spending a lot of money?
+What's the best way to improve at {topic}?
+How do you properly {verb} a {noun}?
+What's a beginner-friendly way to get into {topic}?
+How do I pick up {topic} as a hobby?
+What's a quick way to feel better when I'm tired?
+How do I prepare for a big {occasion}?
+Can you give me step-by-step instructions for {verb}-ing a {noun}?
+What should I know before I try to {verb} for the first time?
+
+# ── Opinions & Debate (20) ────────────────────────────────────────────
+
+What do you think about {topic}?
+Is {topic} overrated?
+Would you rather {verb} a {noun} or stay home?
+Do you think {topic} is important?
+What's better — mornings or evenings?
+Do you prefer {genre} or {genre}?
+Is it better to {verb} often or just occasionally?
+What's your take on {topic}?
+Which is more fun — {topic} or {topic}?
+Do you think people spend too much time thinking about {topic}?
+Is {country} a good place to live?
+Would you rather travel to {country} or {country}?
+What's the most underrated {noun} in existence?
+Do you believe first impressions matter?
+Is it better to be honest or kind when the two conflict?
+What do you think is the most important quality in a friend?
+Would you rather have a lot of friends or a few close ones?
+Do you think {topic} will change in the next ten years?
+What's more satisfying — creating something or learning something?
+Is there such a thing as too much of a good {noun}?
+
+# ── Creative (20) ────────────────────────────────────────────────────
+
+Tell me a short story about a {noun} who could {verb}.
+Imagine a world where everyone had to {verb} every day.
+Describe a character who is obsessed with {topic}.
+What would happen if {country} suddenly disappeared?
+Make up a short fairy tale involving a {noun}.
+Tell me a story that starts with "Once upon a time in {country}".
+Invent a new {noun} and describe what it does.
+Describe a world where {topic} doesn't exist.
+Create a villain whose whole motivation is {topic}.
+Tell me a one-paragraph adventure involving a {noun}.
+What would a {noun} dream about?
+Imagine you could {verb} anything — what would you do first?
+Describe the perfect day if you could {verb} anywhere.
+Write a short poem about {topic}.
+Invent a holiday and explain how people celebrate it.
+Describe a mysterious stranger who arrives in {country}.
+Tell me a story about two {noun}s who become unlikely friends.
+What would the world look like if {topic} was the most important thing?
+Imagine a robot that can only talk about {topic}.
+Describe what a {genre} story set in {country} would be like.
+
+# ── Goodbyes & Transitions (15) ──────────────────────────────────────
+
+Thanks for chatting with me!
+That was really helpful, thank you.
+I have to go now, goodbye.
+You've been great to talk to.
+Thanks, I feel better now.
+I think that's all I needed, cheers.
+Alright, I'm heading off. Take care!
+It was nice talking to you.
+Thanks for your time, that actually helped.
+Okay, I think I've got what I needed. Bye!
+I appreciate you talking with me today.
+This has been a fun chat. See you around.
+Thanks a million, that's exactly what I was looking for.
+I'm off to {verb} now, wish me luck.
+That's all from me — have a good one!
+
+# ── Meta / Self-referential (15) ─────────────────────────────────────
+
+Are you a real AI?
+What can you actually do?
+How do you come up with your answers?
+Do you have feelings?
+What's it like being a chatbot?
+Are you getting smarter over time?
+Do you remember our previous conversations?
+What are your limitations?
+How were you trained?
+Can you lie?
+What do you think of yourself?
+Do you ever get things wrong?
+What's the hardest question someone could ask you?
+How do you decide what to say?
+If you could ask me one question, what would it be?

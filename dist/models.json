@@ -1,0 +1,40 @@
+{
+  "models": [
+    {
+      "id": "wisp",
+      "name": "Wisp",
+      "description": "3.3M params · 13MB · loads instantly",
+      "bin": "model_wisp.bin",
+      "json": "model_wisp.json",
+      "size_mb": 13,
+      "params": "3.3M",
+      "ctx": 64,
+      "default": true,
+      "available": true
+    },
+    {
+      "id": "shade",
+      "name": "Shade",
+      "description": "10.9M params · 5.5MB · click to load",
+      "bin": "model_shade.bin",
+      "json": "model_shade.json",
+      "size_mb": 5.5,
+      "params": "10.9M",
+      "ctx": 128,
+      "default": false,
+      "available": false
+    },
+    {
+      "id": "specter",
+      "name": "Specter",
+      "description": "57.3M params · 28MB · click to load",
+      "bin": "model_specter.bin",
+      "json": "model_specter.json",
+      "size_mb": 28,
+      "params": "57.3M",
+      "ctx": 256,
+      "default": false,
+      "available": false
+    }
+  ]
+}
