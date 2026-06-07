@@ -7,15 +7,19 @@ merge order before touching main.
 
 ## Suggested merge order (dependency-first)
 
+Note: `feature/kv-cache` was branched from `feature/trainer-integration` (not
+`feature/multi-model`), so it already contains the trainer improvements. Merge
+`feature/trainer-integration` first, then `feature/kv-cache` on top.
+
 ```
 feature/trainer-integration        # trainer: val-split + supervision + preserve-case
+  └── feature/kv-cache             # ✅ COMPLETE — O(T²)→O(T) KV cache; BASED ON trainer-integration
   └── feature/expand-data          # Phase 2 data pipeline
         └── feature/templates-and-scripts-2  # 200 templates + launch scripts
+  └── feature/wraith-mvp           # Linux guru MVP (depends on preserve-case in trainer)
 feature/sampling                   # top-k/top-p sampling (pure TS, no deps)
 feature/model-switcher             # UI: models.json + dynamic switcher
-feature/quantization               # 4-bit/8-bit kernel + serializer (gates Specter)
-feature/kv-cache                   # O(T²)→O(T) inference (needed before Specter ships)
-feature/wraith-mvp                 # Linux guru MVP (depends on preserve-case in trainer)
+feature/quantization               # 4-bit/8-bit kernel + serializer (gates Specter) — still completing
 ```
 
 Analysis branches (docs only, no code changes — read then delete):
@@ -125,12 +129,20 @@ is the authoritative version).
 
 ---
 
-### 🔄 `feature/kv-cache` (may not be complete yet)
-**O(T²)→O(T) per-token attention via KV cache.**
+### ✅ `feature/kv-cache`
+**O(T²)→O(T) per-token attention via KV cache. 19/19 tests pass.**
 
-If pushed: `createCache()`, `forwardIncremental()`, `prefill()`, cache-aware `generate()`.
-Correctness test: same prompt + same seed → identical output with/without cache.
-Critical for Specter (without it: ~2s/token in-browser).
+**Based on `feature/trainer-integration`** (not `feature/multi-model`) — already contains
+all trainer improvements. Merge `feature/trainer-integration` first.
+
+- `createCache(model)` — allocates per-layer K/V Float32Array buffers
+- `forwardIncremental(api, sec, arch, token, position, base, cache)` — single-position
+  forward using cached K/V history
+- `prefill(api, sec, arch, tokens, base, cache)` — populates cache from prompt
+- `generate()` gains optional `cache?` param — if provided, uses prefill + incremental
+
+**Correctness verified:** bit-identical output to full-recompute path on all 4 golden
+prompts with the same seed. Critical for Specter (without it: ~2s/token in-browser).
 
 ---
 
