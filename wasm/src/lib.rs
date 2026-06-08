@@ -236,6 +236,35 @@ pub unsafe extern "C" fn matmul_f32w(
     }
 }
 
+/// BF16 (bfloat16) matmul. Weights stored as u16; bf16 is the top 16 bits of
+/// the f32 bit pattern, so conversion is a single shift — no scale needed.
+/// Precision loss is minimal (~3 decimal digits vs ~7 for fp32).
+#[no_mangle]
+pub unsafe extern "C" fn matmul_bf16(
+    weights: *const u16,
+    biases:  *const f32,
+    input:   *const f32,
+    output:  *mut f32,
+    in_dim:  i32,
+    out_dim: i32,
+) {
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let w   = core::slice::from_raw_parts(weights, out_dim * in_dim);
+    let b   = core::slice::from_raw_parts(biases, out_dim);
+    let inp = core::slice::from_raw_parts(input, in_dim);
+    let out = core::slice::from_raw_parts_mut(output, out_dim);
+    for o in 0..out_dim {
+        let mut sum = b[o];
+        for i in 0..in_dim {
+            // bf16 → f32: place the u16 bits in the high half of a u32
+            let wf = f32::from_bits((w[o * in_dim + i] as u32) << 16);
+            sum += wf * inp[i];
+        }
+        out[o] = sum;
+    }
+}
+
 /// Multi-head causal self-attention (float32).
 ///
 /// qkv:      [seq, d*3]  — Q | K | V interleaved per position

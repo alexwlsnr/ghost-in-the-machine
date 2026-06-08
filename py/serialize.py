@@ -65,6 +65,19 @@ def quantize_4bit(tensor: torch.Tensor) -> tuple[bytes, float]:
     return bytes(out), scale
 
 
+def quantize_bf16(tensor: torch.Tensor) -> bytes:
+    """Store a float32 tensor as bfloat16 (top 16 bits of each f32 bit pattern).
+
+    No scale needed — bf16 preserves the full fp32 exponent range.
+    Conversion in kernel: (u16 as u32) << 16 → f32 bit pattern.
+    """
+    t = tensor.detach().cpu().to(torch.float32)
+    # View as uint32, shift right 16 to get the top 16 bits, store as uint16
+    u32 = t.numpy().view(np.uint32)
+    u16 = (u32 >> 16).astype(np.uint16)
+    return u16.tobytes()
+
+
 def quantize_8bit(tensor: torch.Tensor) -> tuple[bytes, float]:
     """Quantize a float32 tensor to i8 in [-127, 127] + a per-tensor scale.
 
@@ -100,7 +113,7 @@ def serialize(
     maxlen  = arch.get("max_len", 64)
     sqrt_d  = math.sqrt(d)
 
-    weight_format = {32: "fp32", 8: "int8", 4: "int4"}[weight_bits]
+    weight_format = {32: "fp32", 16: "bfloat16", 8: "int8", 4: "int4"}[weight_bits]
 
     sections: dict[str, dict[str, Any]] = {}
     buf = bytearray()
@@ -114,6 +127,10 @@ def serialize(
         elif quantize and weight_bits == 8:
             raw, scale = quantize_8bit(t)
             dtype = "int8"
+        elif quantize and weight_bits == 16:
+            raw = quantize_bf16(t)
+            scale = None
+            dtype = "bfloat16"
         else:
             raw = t.numpy().tobytes()
             scale = None
@@ -189,7 +206,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Canonical Ghost-in-the-Machine serializer")
     parser.add_argument("checkpoint", help="Path to .pt checkpoint")
     parser.add_argument("--out", "-o", required=True, help="Output prefix (e.g. dist/model_wisp)")
-    parser.add_argument("--weight-bits", "--bits", type=int, default=32, choices=[4, 8, 32],
+    parser.add_argument("--weight-bits", "--bits", type=int, default=32, choices=[4, 8, 16, 32],
                         help="Weight bit-width: 32 (float32), 8 (int8), or 4 (packed int4)")
     args = parser.parse_args()
     serialize(args.checkpoint, args.out, args.weight_bits)

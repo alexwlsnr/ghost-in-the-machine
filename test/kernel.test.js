@@ -338,6 +338,66 @@ test('matmul_8bit: scale proportionality -- doubling scale doubles output', () =
   }
 });
 
+// ── BF16 kernel ──────────────────────────────────────────────────────────────
+
+/**
+ * Pack float32 values into bf16 (bfloat16) uint16 representation.
+ * bf16 = top 16 bits of the f32 bit pattern. Conversion: view f32 bits as u32,
+ * shift right 16. This is lossless for the exponent; mantissa loses 16 bits.
+ */
+function packBf16(floats) {
+  const f32 = new Float32Array(floats);
+  const u32 = new Uint32Array(f32.buffer);
+  return new Uint16Array(floats.length).map((_, i) => u32[i] >>> 16);
+}
+
+function refMatmulBf16(weights_f32, b, inp, inDim, outDim) {
+  // Same as refMatmul but weights stored as bf16 (slight precision loss)
+  const u16 = packBf16(weights_f32);
+  const wAsF32 = Array.from(u16).map(u => {
+    const buf = new ArrayBuffer(4);
+    new Uint16Array(buf)[1] = u;  // top 16 bits = bf16
+    return new Float32Array(buf)[0];
+  });
+  return refMatmul(wAsF32, b, inp, inDim, outDim);
+}
+
+function putU16(off, arr) {
+  const view = new Uint16Array(api.memory.buffer, off, arr.length);
+  view.set(arr);
+  return { ptr: off, next: (off + arr.length * 2 + 15) & ~15 };
+}
+
+test('matmul_bf16: output matches reference (fp32 weights stored as bf16)', () => {
+  const inDim = 32, outDim = 16;
+  const weights_f32 = seqVals(inDim * outDim, 5);
+  const b = seqVals(outDim, 13);
+  const inp = seqVals(inDim, 21);
+  const expected = refMatmulBf16(weights_f32, b, inp, inDim, outDim);
+
+  let p = reset();
+  const W = putU16(p, packBf16(weights_f32));
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, inp);
+  const O = putF32(I.next, new Array(outDim).fill(0));
+
+  api.matmul_bf16(W.ptr, B.ptr, I.ptr, O.ptr, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), expected, 'matmul_bf16', 1e-3, 1e-3);
+});
+
+test('matmul_bf16: zero input yields the bias', () => {
+  const inDim = 16, outDim = 8;
+  const weights_f32 = seqVals(inDim * outDim, 7);
+  const b = seqVals(outDim, 99);
+  let p = reset();
+  const W = putU16(p, packBf16(weights_f32));
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, new Array(inDim).fill(0));
+  const O = putF32(I.next, new Array(outDim).fill(123));
+  api.matmul_bf16(W.ptr, B.ptr, I.ptr, O.ptr, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), b, 'matmul_bf16-bias', 1e-6, 1e-6);
+});
+
 // ── Attention kernel ──────────────────────────────────────────────────────────
 
 /**

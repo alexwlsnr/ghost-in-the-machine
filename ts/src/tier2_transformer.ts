@@ -16,6 +16,7 @@ interface WasmApi {
   attention_f32(qkv: number, scores: number, attn: number, seq: number, d: number, nHeads: number): void;
   matmul_8bit(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   matmul_4bit(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
+  matmul_bf16(w: number, b: number, inp: number, out: number, inD: number, outD: number): void;
 }
 
 const PAD = 256;
@@ -94,9 +95,10 @@ function makeMatmulDispatch(api: WasmApi, sec: Record<string, SectionDef>, base:
   return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
     const s = sec[wName];
     const wPtr = S(wName);
-    if (s.dtype === 'int8')       api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-    else if (s.dtype === 'int4')  api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-    else                          api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
+    if (s.dtype === 'int8')        api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    else if (s.dtype === 'int4')   api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    else if (s.dtype === 'bfloat16') api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
+    else                           api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
   };
 }
 
