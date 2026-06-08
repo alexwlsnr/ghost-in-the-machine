@@ -336,9 +336,15 @@
 const _t = Date.now();
 const { loadModel, encode, generate, createCache, detectSIMD } = await import('./tier2_transformer.js?t=' + _t);
 
-// Detect SIMD support and pick the right kernel
+// Detect SIMD support; track whether it's currently enabled (toggleable)
 const simdSupported = await detectSIMD();
-const wasmFile = simdSupported ? './tier2_kernel_simd.wasm?t=' + _t : './tier2_kernel.wasm?t=' + _t;
+let simdEnabled = simdSupported;
+
+function activeWasmFile() {
+  return (simdEnabled && simdSupported)
+    ? './tier2_kernel_simd.wasm?t=' + _t
+    : './tier2_kernel.wasm?t=' + _t;
+}
 
 const terminal    = document.getElementById('terminal');
 const input       = document.getElementById('query-input');
@@ -479,7 +485,7 @@ async function switchModel(id) {
 
   try {
     const loaded = await loadModel({
-      wasm: wasmFile,
+      wasm: activeWasmFile(),
       bin:  `./${reg.bin}?v=1`,
       json: `./${reg.json}?v=1`,
       onProgress: (pct) => {
@@ -540,13 +546,35 @@ async function boot() {
   registry = data.models.map(m => ({ ...m, _loading: false }));
   const defaultModel = registry.find(r => r.default) || registry[0];
 
-  // Show SIMD badge if supported
-  if (simdSupported) {
-    document.getElementById('simd-badge').style.display = 'inline';
+  // SIMD badge — show if supported, wire up toggle
+  const simdBadge = document.getElementById('simd-badge');
+  function updateSimdBadge() {
+    if (!simdSupported) return;
+    simdBadge.style.display  = 'inline';
+    simdBadge.style.cursor   = 'pointer';
+    simdBadge.title          = simdEnabled ? 'Click to disable SIMD (reload models)' : 'Click to enable SIMD (reload models)';
+    simdBadge.style.color       = simdEnabled ? '#00ffff' : '#33ff3344';
+    simdBadge.style.borderColor = simdEnabled ? '#00ffff44' : '#33ff3322';
+    simdBadge.textContent    = simdEnabled ? '⚡ SIMD' : '○ SCALAR';
   }
+  updateSimdBadge();
+
+  simdBadge.addEventListener('click', () => {
+    if (!simdSupported || isSwitching) return;
+    simdEnabled = !simdEnabled;
+    updateSimdBadge();
+    // Drop all cached models so next load uses the newly selected kernel
+    modelCache = {};
+    kvCaches   = {};
+    const prev = activeId;
+    activeId   = null;
+    setInputEnabled(false);
+    appendLine(`KERNEL: switched to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading ${prev || ''}...`, 'boot');
+    if (prev) switchToModel(prev);
+  });
 
   // Boot message
-  appendLine('GHOST IN THE MACHINE v2.5 (build 15)', 'ready');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 16)', 'ready');
   appendLine(`Kernel: WebAssembly${simdSupported ? ' + SIMD128 ⚡' : ' (scalar)'}`, 'boot');
   appendLine('Byte-level Tiny Transformer | Multi-model registry', 'boot');
   appendLine('', 'boot');
@@ -572,7 +600,7 @@ async function boot() {
 
   try {
     const loaded = await loadModel({
-      wasm: wasmFile,
+      wasm: activeWasmFile(),
       bin:  `./${defaultModel.bin}?v=1`,
       json: `./${defaultModel.json}?v=1`,
       onProgress: (pct) => { loadingFill.style.width = (10 + pct * 0.9) + '%'; },
