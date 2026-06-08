@@ -86,6 +86,20 @@ export function encode(text: string): number[] {
   return t;
 }
 
+// ─── Matmul dispatch ───────────────────────────────────────────────
+// Routes weight matmul to the correct kernel based on section dtype.
+// Biases are always fp32. Head weight stays fp32 (mixed-precision layout).
+function makeMatmulDispatch(api: WasmApi, sec: Record<string, SectionDef>, base: number) {
+  const S = (name: string) => base + sec[name].offset;
+  return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
+    const s = sec[wName];
+    const wPtr = S(wName);
+    if (s.dtype === 'int8')       api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    else if (s.dtype === 'int4')  api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    else                          api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
+  };
+}
+
 // ─── Forward ───────────────────────────────────────────────────────
 
 export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
@@ -93,16 +107,7 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
 
   // Section pointer helper: actual address = base + manifest offset
   const S = (name: string) => base + sec[name].offset;
-
-  // Dispatch matmul to the right kernel based on the section's dtype.
-  // Biases are always fp32 and passed as a plain pointer.
-  const mw = (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
-    const s = sec[wName];
-    const wPtr = S(wName);
-    if (s.dtype === 'int8')  api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-    else if (s.dtype === 'int4') api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-    else                     api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
-  };
+  const mw = makeMatmulDispatch(api, sec, base);
 
   let off = base;
   for (const s of Object.values(sec)) off = Math.max(off, base + s.offset + s.size);
@@ -221,6 +226,7 @@ function forwardIncremental(
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
   const mem = api.memory;
   const S = (name: string) => base + sec[name].offset;
+  const mw = makeMatmulDispatch(api, sec, base);
 
   // Scratch positioned after all weight sections, same convention as forward().
   let off = base;
@@ -260,11 +266,11 @@ function forwardIncremental(
     api.layer_norm_f32(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`), d, 1e-5);
 
     // 2b. Q/K/V for position pos
-    api.matmul_f32w(S(`${pfx}_q_weight`), S(`${pfx}_q_bias`), lOff, qOff, d, d);
-    api.matmul_f32w(S(`${pfx}_k_weight`), S(`${pfx}_k_bias`), lOff, kvOff, d, d);
+    mw(`${pfx}_q_weight`, S(`${pfx}_q_bias`), lOff, qOff, d, d);
+    mw(`${pfx}_k_weight`, S(`${pfx}_k_bias`), lOff, kvOff, d, d);
     cacheK.set(f32(kvOff, d), pos * d);   // Store K[pos] into cache
 
-    api.matmul_f32w(S(`${pfx}_v_weight`), S(`${pfx}_v_bias`), lOff, kvOff, d, d);
+    mw(`${pfx}_v_weight`, S(`${pfx}_v_bias`), lOff, kvOff, d, d);
     cacheV.set(f32(kvOff, d), pos * d);   // Store V[pos] into cache
 
     // 2c. Multi-head attention: Q[pos] attends to K[0..pos], V[0..pos]
@@ -294,7 +300,7 @@ function forwardIncremental(
     }
 
     // 2d. Output projection + residual
-    api.matmul_f32w(S(`${pfx}_o_weight`), S(`${pfx}_o_bias`), aOff, lOff, d, d);
+    mw(`${pfx}_o_weight`, S(`${pfx}_o_bias`), aOff, lOff, d, d);
     const lVec = f32(lOff, d);
     for (let j = 0; j < d; j++) xVec[j] += lVec[j];
 
@@ -307,9 +313,9 @@ function forwardIncremental(
     // 2f. ff1 (d -> d_ff), ReLU, ff2 (d_ff -> lOff as output).
     // ffOff is bump-allocated inside the layer loop; monotone bump means no aliasing.
     const ffOff = ba(arch.d_ff);
-    api.matmul_f32w(S(`${pfx}_ff1_weight`), S(`${pfx}_ff1_bias`), lOff, ffOff, d, arch.d_ff);
+    mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, ffOff, d, arch.d_ff);
     api.relu_f32(ffOff, arch.d_ff);
-    api.matmul_f32w(S(`${pfx}_ff2_weight`), S(`${pfx}_ff2_bias`), ffOff, lOff, arch.d_ff, d);
+    mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), ffOff, lOff, arch.d_ff, d);
 
     // 2g. Residual add
     for (let j = 0; j < d; j++) xVec[j] += lVec[j];
