@@ -35,7 +35,8 @@ test('two turns of history in chronological order', () => {
     { q: 'HI', r: 'HEY' },
     { q: 'HOW ARE YOU', r: 'GREAT' },
   ];
-  const tokens = buildContextTokens(history, 'TELL ME A JOKE', 256);
+  // maxHistory=2 explicitly — default is 1 (Spec512 v1 degrades past 1 turn)
+  const tokens = buildContextTokens(history, 'TELL ME A JOKE', 256, 2);
   // Expected: HI[SEP]HEY[SEP]HOW ARE YOU[SEP]GREAT[SEP]TELL ME A JOKE[SEP]
   const hiBytes    = encode('HI');
   const heyBytes   = encode('HEY');

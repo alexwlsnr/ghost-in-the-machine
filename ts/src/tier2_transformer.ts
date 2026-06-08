@@ -381,22 +381,27 @@ export interface Turn { q: string; r: string; }
 /**
  * Build the token sequence for a new query, prepending conversation history.
  *
- * Layout with 2 history turns:
- *   [q1][SEP][r1][SEP][q2][SEP][r2][SEP][query][SEP]
+ * Layout with 1 history turn:
+ *   [q_prev][SEP][r_prev][SEP][query][SEP]
  *
- * Turns are added from newest to oldest; oldest turns are silently dropped
- * when the context budget (maxLen) would be exceeded. The current query is
- * always present at the end regardless of budget pressure.
+ * maxHistory caps how many turns are injected. Default 1 — Spec512 v1 was
+ * trained on mostly 2-turn sequences so >1 history turn degrades quality.
+ * Increase when a model is retrained with richer multi-turn data.
+ *
+ * Turns are added newest-first; oldest turns are silently dropped when the
+ * context budget (maxLen) would be exceeded.
  */
 export function buildContextTokens(
   history: Turn[],
   query: string,
   maxLen: number,
+  maxHistory: number = 1,
 ): number[] {
   const queryTokens = [...encode(query.toUpperCase()), SEP];
   let tokens = queryTokens;
 
-  for (const turn of [...history].reverse()) {
+  const recent = history.slice(-maxHistory);
+  for (const turn of [...recent].reverse()) {
     const chunk = [
       ...encode(turn.q.toUpperCase()), SEP,
       ...encode(turn.r.toUpperCase()), SEP,

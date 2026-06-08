@@ -433,7 +433,7 @@ let registry   = [];
 let modelCache = {};
 let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
 let histories  = {};   // id → Turn[] — conversation history per model
-let memoryOn   = true;  // history injection — on by default (Spec512 needs it; experimental on ctx=128)
+let memoryOn   = false; // off by default — multi-turn training needs more data before enabling
 let activeId   = null;
 let isSwitching = false;
 
