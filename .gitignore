@@ -16,6 +16,16 @@ ts/package-lock.json
 *.pt
 *.pt.bak
 
+# Large generated data files (reproducible from scripts)
+data/soda_full.txt
+data/soda_100k.txt
+data/shade_soda.txt
+data/training_pairs.txt
+data/wisp_combined.txt
+
+# Plugin/superpowers cache
+docs/superpowers/
+
 # OS
 .DS_Store
 Thumbs.db

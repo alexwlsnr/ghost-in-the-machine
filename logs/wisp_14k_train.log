@@ -1,0 +1,48 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+Loaded 14525 training pairs
+Resuming from ckpt/wisp_14k.pt
+Resuming from epoch 151, 449 epochs remaining
+Device: cuda
+Training on 14525 pairs, 449 epochs
+Sequences — train: 13799, val: 726
+Parameters: 3,324,416
+Mixed precision: bf16 autocast enabled
+  Epoch    5/449: loss=0.8824, acc=0.720, val_loss=0.9233
+  Epoch   10/449: loss=0.8796, acc=0.721, val_loss=0.9295
+  Epoch   15/449: loss=0.8779, acc=0.722, val_loss=0.9270
+  Epoch   20/449: loss=0.8759, acc=0.722, val_loss=0.9264
+  Epoch   25/449: loss=0.8746, acc=0.722, val_loss=0.9250
+  Epoch   30/449: loss=0.8717, acc=0.723, val_loss=0.9224
+  Epoch   35/449: loss=0.8697, acc=0.724, val_loss=0.9205
+  Epoch   40/449: loss=0.8680, acc=0.725, val_loss=0.9198
+  Epoch   45/449: loss=0.8653, acc=0.725, val_loss=0.9217
+  Epoch   50/449: loss=0.8646, acc=0.726, val_loss=0.9221
+  Epoch   55/449: loss=0.8623, acc=0.726, val_loss=0.9191
+  Epoch   60/449: loss=0.8606, acc=0.727, val_loss=0.9220
+  Epoch   65/449: loss=0.8585, acc=0.727, val_loss=0.9216
+  Epoch   70/449: loss=0.8558, acc=0.728, val_loss=0.9229
+  Epoch   75/449: loss=0.8539, acc=0.729, val_loss=0.9177
+  Epoch   80/449: loss=0.8526, acc=0.729, val_loss=0.9220
+  Epoch   85/449: loss=0.8500, acc=0.729, val_loss=0.9212
+  Epoch   90/449: loss=0.8480, acc=0.730, val_loss=0.9130
+  Epoch   95/449: loss=0.8466, acc=0.731, val_loss=0.9153
+  Epoch  100/449: loss=0.8459, acc=0.731, val_loss=0.9183
+  Epoch  105/449: loss=0.8430, acc=0.731, val_loss=0.9175
+  Epoch  110/449: loss=0.8424, acc=0.732, val_loss=0.9129
+  Epoch  115/449: loss=0.8392, acc=0.733, val_loss=0.9163
+  Epoch  120/449: loss=0.8376, acc=0.733, val_loss=0.9203
+  Epoch  125/449: loss=0.8360, acc=0.734, val_loss=0.9205
+  Epoch  130/449: loss=0.8336, acc=0.734, val_loss=0.9148
+  Epoch  135/449: loss=0.8324, acc=0.735, val_loss=0.9177
+
+Early stop at epoch 135 (no val improvement for 25 epochs)
+
+Best acc: 0.732 at epoch 110
+
+Sample generations:
+  HELLO                → HEY THERE!
+  HOW ARE YOU          → HEY THERE!
+  TELL ME A JOKE       → WHY DID THE BEAR GET-STARTED AND A SIMPLE MEDITATI
+  WHO ARE YOU          → HEY THERE!
+  THANKS               → YOURE TOO!

@@ -1,0 +1,11 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading allenai/soda (train split) — streaming…
+  50,000 written  (164,795 seen, 70% filtered)
+  100,000 written  (341,902 seen, 71% filtered)
+
+Done: 100,000 pairs → data/soda_100k.txt
+      341,902 total seen, 71% filtered
+
+✓ 100,000 pairs written to data/soda_100k.txt
+
+Next: python3 py/train_transformer.py --file data/soda_100k.txt ...

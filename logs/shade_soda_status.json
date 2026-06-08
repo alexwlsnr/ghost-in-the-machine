@@ -1,0 +1,15 @@
+{
+  "epoch": 120,
+  "epochs_total": 120,
+  "train_loss": 0.759952,
+  "val_loss": 0.726868,
+  "best_val_loss": 0.726586,
+  "best_epoch": 106,
+  "stopped_early": false,
+  "state": "done",
+  "pid": 3227990,
+  "checkpoint": "ckpt/shade_soda.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-08T10:42:18Z",
+  "started_at": "2026-06-08T09:38:14Z"
+}

@@ -1,0 +1,47 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading allenai/soda (train split) — streaming…
+  50,000 written  (164,795 seen, 70% filtered)
+  100,000 written  (341,902 seen, 71% filtered)
+  150,000 written  (522,159 seen, 71% filtered)
+  200,000 written  (695,166 seen, 71% filtered)
+  250,000 written  (877,708 seen, 72% filtered)
+  300,000 written  (1,072,469 seen, 72% filtered)
+  350,000 written  (1,258,142 seen, 72% filtered)
+  400,000 written  (1,443,450 seen, 72% filtered)
+  450,000 written  (1,632,152 seen, 72% filtered)
+  500,000 written  (1,832,530 seen, 73% filtered)
+  550,000 written  (2,029,341 seen, 73% filtered)
+  600,000 written  (2,222,928 seen, 73% filtered)
+  650,000 written  (2,417,395 seen, 73% filtered)
+  700,000 written  (2,624,022 seen, 73% filtered)
+  750,000 written  (2,828,441 seen, 73% filtered)
+  800,000 written  (3,026,641 seen, 74% filtered)
+  850,000 written  (3,225,560 seen, 74% filtered)
+  900,000 written  (3,433,609 seen, 74% filtered)
+  950,000 written  (3,647,575 seen, 74% filtered)
+  1,000,000 written  (3,856,635 seen, 74% filtered)
+  1,050,000 written  (4,073,346 seen, 74% filtered)
+  1,100,000 written  (4,292,221 seen, 74% filtered)
+  1,150,000 written  (4,502,703 seen, 74% filtered)
+  1,200,000 written  (4,715,297 seen, 75% filtered)
+  1,250,000 written  (4,934,846 seen, 75% filtered)
+  1,300,000 written  (5,158,081 seen, 75% filtered)
+  1,350,000 written  (5,370,121 seen, 75% filtered)
+  1,400,000 written  (5,594,644 seen, 75% filtered)
+  1,450,000 written  (5,818,444 seen, 75% filtered)
+  1,500,000 written  (6,037,405 seen, 75% filtered)
+  1,550,000 written  (6,261,770 seen, 75% filtered)
+  1,600,000 written  (6,487,253 seen, 75% filtered)
+  1,650,000 written  (6,714,673 seen, 75% filtered)
+  1,700,000 written  (6,927,638 seen, 75% filtered)
+  1,750,000 written  (7,157,939 seen, 76% filtered)
+  1,800,000 written  (7,387,752 seen, 76% filtered)
+  1,850,000 written  (7,616,871 seen, 76% filtered)
+  1,900,000 written  (7,843,571 seen, 76% filtered)
+
+Done: 1,909,764 pairs → data/soda_full.txt
+      7,889,651 total seen, 76% filtered
+
+✓ 1,909,764 pairs written to data/soda_full.txt
+
+Next: python3 py/train_transformer.py --file data/soda_full.txt ...

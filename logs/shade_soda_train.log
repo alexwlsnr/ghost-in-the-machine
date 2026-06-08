@@ -1,0 +1,41 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+Loaded 114041 training pairs
+Device: cuda
+Training on 114041 pairs, 120 epochs
+Sequences — train: 108339, val: 5702
+Parameters: 10,894,848
+Mixed precision: bf16 autocast enabled
+  Epoch    5/120: loss=0.9717, acc=0.692, val_loss=0.8937
+  Epoch   10/120: loss=0.9014, acc=0.712, val_loss=0.8383
+  Epoch   15/120: loss=0.8680, acc=0.722, val_loss=0.8067
+  Epoch   20/120: loss=0.8469, acc=0.729, val_loss=0.7947
+  Epoch   25/120: loss=0.8323, acc=0.733, val_loss=0.7781
+  Epoch   30/120: loss=0.8212, acc=0.736, val_loss=0.7696
+  Epoch   35/120: loss=0.8129, acc=0.739, val_loss=0.7629
+  Epoch   40/120: loss=0.8057, acc=0.741, val_loss=0.7577
+  Epoch   45/120: loss=0.7997, acc=0.743, val_loss=0.7540
+  Epoch   50/120: loss=0.7944, acc=0.744, val_loss=0.7494
+  Epoch   55/120: loss=0.7897, acc=0.746, val_loss=0.7456
+  Epoch   60/120: loss=0.7852, acc=0.747, val_loss=0.7434
+  Epoch   65/120: loss=0.7814, acc=0.748, val_loss=0.7393
+  Epoch   70/120: loss=0.7779, acc=0.749, val_loss=0.7379
+  Epoch   75/120: loss=0.7742, acc=0.750, val_loss=0.7359
+  Epoch   80/120: loss=0.7716, acc=0.751, val_loss=0.7326
+  Epoch   85/120: loss=0.7689, acc=0.752, val_loss=0.7325
+  Epoch   90/120: loss=0.7668, acc=0.753, val_loss=0.7298
+  Epoch   95/120: loss=0.7647, acc=0.753, val_loss=0.7286
+  Epoch  100/120: loss=0.7629, acc=0.754, val_loss=0.7282
+  Epoch  105/120: loss=0.7613, acc=0.754, val_loss=0.7282
+  Epoch  110/120: loss=0.7608, acc=0.754, val_loss=0.7275
+  Epoch  115/120: loss=0.7601, acc=0.754, val_loss=0.7270
+  Epoch  120/120: loss=0.7600, acc=0.755, val_loss=0.7269
+
+Best acc: 0.754 at epoch 106
+
+Sample generations:
+  HELLO                → HEY THERE!
+  HOW ARE YOU          → HEY THERE!
+  TELL ME A JOKE       → HI, I'M GROWING FOR A CONCERT!
+  WHO ARE YOU          → CERTAINLY FOR ME?
+  THANKS               → DO YOU THINK THAT WOULD REALLY GET BETTER AT THE A

@@ -1,0 +1,30 @@
+Generated 697 unique greeting prompts
+Generating 2091 responses (3 per prompt) via 32 workers...
+  100/2091 done  0 valid pairs
+  200/2091 done  0 valid pairs
+  300/2091 done  15 valid pairs
+  400/2091 done  46 valid pairs
+  500/2091 done  72 valid pairs
+  600/2091 done  109 valid pairs
+  700/2091 done  150 valid pairs
+  800/2091 done  184 valid pairs
+  900/2091 done  219 valid pairs
+  1000/2091 done  255 valid pairs
+  1100/2091 done  301 valid pairs
+  1200/2091 done  347 valid pairs
+  1300/2091 done  393 valid pairs
+  1400/2091 done  464 valid pairs
+  1500/2091 done  560 valid pairs
+  1600/2091 done  656 valid pairs
+  1700/2091 done  754 valid pairs
+  1800/2091 done  848 valid pairs
+  1900/2091 done  941 valid pairs
+  2000/2091 done  1030 valid pairs
+  2091/2091 done  1112 valid pairs
+
+Written 851 pairs → data/greetings.txt
+  Wisp-compatible  (ctx≤64):  840
+  Shade-compatible (ctx≤128): 851
+
+Mix into training data:
+  cat data/greetings.txt py/training-data-transformer.txt > data/wisp_train_v2.txt
