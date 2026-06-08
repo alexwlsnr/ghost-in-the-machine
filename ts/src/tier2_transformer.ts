@@ -375,6 +375,38 @@ function prefill(
 
 // ─── Generation ────────────────────────────────────────────────────
 
+/** One turn of conversation history: the human query and the model's response. */
+export interface Turn { q: string; r: string; }
+
+/**
+ * Build the token sequence for a new query, prepending conversation history.
+ *
+ * Layout with 2 history turns:
+ *   [q1][SEP][r1][SEP][q2][SEP][r2][SEP][query][SEP]
+ *
+ * Turns are added from newest to oldest; oldest turns are silently dropped
+ * when the context budget (maxLen) would be exceeded. The current query is
+ * always present at the end regardless of budget pressure.
+ */
+export function buildContextTokens(
+  history: Turn[],
+  query: string,
+  maxLen: number,
+): number[] {
+  const queryTokens = [...encode(query.toUpperCase()), SEP];
+  let tokens = queryTokens;
+
+  for (const turn of [...history].reverse()) {
+    const chunk = [
+      ...encode(turn.q.toUpperCase()), SEP,
+      ...encode(turn.r.toUpperCase()), SEP,
+    ];
+    if (tokens.length + chunk.length >= maxLen) break;
+    tokens = [...chunk, ...tokens];
+  }
+  return tokens;
+}
+
 export interface Step { char: string; token: number; done: boolean; }
 
 /**
@@ -414,12 +446,14 @@ export async function* generate(
   model: Awaited<ReturnType<typeof loadModel>>,
   prompt: string, maxNew = 160, temp = 0.8, rand: () => number = Math.random,
   cache?: KVCache, topK = 0, topP = 1.0,
+  history?: Turn[],
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
   const win = arch.max_len - 1;
-  // Inject SEP after the prompt — puts the model in "response zone" so it
-  // generates R directly. Matches Python generate() which does the same.
-  const tokens = [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
+  // Build token sequence — with history if provided, bare query otherwise.
+  const tokens = (history && history.length > 0)
+    ? buildContextTokens(history, prompt, win)
+    : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
 
   // -- Cached path ----------------------------------------------------
   if (cache !== undefined) {
