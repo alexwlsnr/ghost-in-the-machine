@@ -599,9 +599,11 @@ function activeModel() {
 }
 
 // Resolve bin/json URLs — prefer bin_url/json_url (GitHub Releases) over local path
+// Always use local paths for now — GitHub Releases doesn't support CORS from browsers.
+// bin_url/json_url in models.json is reserved for future CDN (HuggingFace/R2) integration.
 function modelUrls(reg) {
-  const bin  = reg.bin_url  ? reg.bin_url  : `./${reg.bin}?v=1`;
-  const json = reg.json_url ? reg.json_url : `./${reg.json}?v=1`;
+  const bin  = `./${reg.bin}?v=1`;
+  const json = `./${reg.json}?v=1`;
   return { bin, json };
 }
 
