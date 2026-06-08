@@ -8,7 +8,7 @@
       "json": "model_wisp_8bit.json",
       "size_mb": 3.6,
       "params": "3.3M",
-      "ctx": 64,
+      "ctx": 128,
       "default": true,
       "available": true
     },
@@ -20,7 +20,7 @@
       "json": "model_wisp_fp32.json",
       "size_mb": 13,
       "params": "3.3M",
-      "ctx": 64,
+      "ctx": 128,
       "default": false,
       "available": true
     },
