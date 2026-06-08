@@ -307,6 +307,38 @@ class TestLengthBuckets(unittest.TestCase):
         max_bucket = max(counts, key=lambda k: counts[k])
         self.assertEqual(max_bucket, terse_instr)
 
+    def test_custom_weights_shifts_distribution(self):
+        """Custom weights [0,0,0,1] should always return the long bucket."""
+        rng = random.Random(1)
+        for _ in range(50):
+            result = sample_length_instruction(rng, weights=(0, 0, 0, 1))
+            self.assertEqual(result, LENGTH_BUCKETS[3][1])
+
+    def test_custom_weights_specter_profile(self):
+        """Specter profile (20/30/35/15) makes long most common vs default (5%)."""
+        rng = random.Random(99)
+        n = 5000
+        long_instr = LENGTH_BUCKETS[3][1]
+
+        default_count = sum(
+            1 for _ in range(n) if sample_length_instruction(rng) == long_instr
+        )
+        rng2 = random.Random(99)
+        specter_count = sum(
+            1 for _ in range(n)
+            if sample_length_instruction(rng2, weights=(20, 30, 35, 15)) == long_instr
+        )
+        self.assertGreater(specter_count, default_count * 2,
+                           "Specter profile should yield >2× more long responses")
+
+    def test_custom_weights_wrong_length_raises(self):
+        with self.assertRaises(ValueError):
+            sample_length_instruction(weights=(1, 2, 3))  # must be len 4
+
+    def test_custom_weights_all_zero_raises(self):
+        with self.assertRaises(ValueError):
+            sample_length_instruction(weights=(0, 0, 0, 0))
+
 
 # ─── Response filtering ───────────────────────────────────────────────────────
 

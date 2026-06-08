@@ -55,13 +55,37 @@ for _prob, _instr in LENGTH_BUCKETS:
     _BUCKET_CUMULATIVE.append((_cum, _instr))
 
 
-def sample_length_instruction(rng: random.Random | None = None) -> str:
-    """Sample a length instruction according to the bucket distribution."""
+def sample_length_instruction(
+    rng: random.Random | None = None,
+    weights: tuple[float, ...] | None = None,
+) -> str:
+    """Sample a length instruction, optionally overriding the bucket weights.
+
+    weights: 4-tuple of non-negative numbers (terse, short, medium, long).
+             Need not sum to 1 — normalised automatically.
+             Default: LENGTH_BUCKETS distribution (40/35/20/5).
+    """
+    if weights is not None:
+        if len(weights) != len(LENGTH_BUCKETS):
+            raise ValueError(
+                f"weights must have {len(LENGTH_BUCKETS)} entries, got {len(weights)}"
+            )
+        total = sum(weights)
+        if total <= 0:
+            raise ValueError("weights must contain at least one positive value")
+        cumulative = []
+        cum = 0.0
+        for w, (_, instr) in zip(weights, LENGTH_BUCKETS):
+            cum += w / total
+            cumulative.append((cum, instr))
+    else:
+        cumulative = _BUCKET_CUMULATIVE
+
     r = (rng or random).random()
-    for threshold, instruction in _BUCKET_CUMULATIVE:
+    for threshold, instruction in cumulative:
         if r < threshold:
             return instruction
-    return _BUCKET_CUMULATIVE[-1][1]
+    return cumulative[-1][1]
 
 
 # ─── Built-in template seed bank ────────────────────────────────────────────
@@ -526,9 +550,10 @@ def _generate_response(
     query: str,
     max_ctx: int,
     rng: random.Random,
+    length_weights: tuple[float, ...] | None = None,
 ) -> tuple[str, str] | None:
     """Generate a response for a query with length-stratified system prompt."""
-    length_instr = sample_length_instruction(rng)
+    length_instr = sample_length_instruction(rng, weights=length_weights)
     system = SYSTEM_PROMPT + " " + length_instr
 
     try:
@@ -571,6 +596,7 @@ def phase5_responses(
     output_file: str,
     checkpoint_path: str,
     state: dict,
+    length_weights: tuple[float, ...] | None = None,
 ) -> list[tuple[str, str]]:
     """Generate responses for all prompts and write to output file."""
     existing_pairs: list[tuple[str, str]] = state["data"].get("phase5_pairs", [])
@@ -591,7 +617,8 @@ def phase5_responses(
             # Each call gets its own RNG clone to avoid sharing state across threads
             call_rng = random.Random(rng.randint(0, 2**31))
             fut = pool.submit(
-                _generate_response, endpoint, model, api_key, prompt, max_ctx, call_rng
+                _generate_response, endpoint, model, api_key, prompt, max_ctx,
+                call_rng, length_weights
             )
             future_map[fut] = prompt
 
@@ -724,6 +751,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 output_file=args.output,
                 checkpoint_path=checkpoint_path,
                 state=state,
+                length_weights=args.length_weights,
             )
             state["data"]["phase5_pairs"] = pairs
             state["completed_phases"] = list(completed | {5})
@@ -772,6 +800,17 @@ def main() -> None:
         help="Max context length for response filtering (use 64 for Wisp, 128 for Shade, 256 for Specter)",
     )
     parser.add_argument(
+        "--length-weights", type=str, default=None,
+        metavar="T,S,M,L",
+        help=(
+            "Comma-separated weights for the 4 length buckets: terse,short,medium,long. "
+            "Need not sum to 1 (normalised automatically). "
+            "Default: 40,35,20,5 (Wisp-friendly). "
+            "Specter-friendly: 20,30,35,15. "
+            "Example: --length-weights 20,30,35,15"
+        ),
+    )
+    parser.add_argument(
         "--samples-per-template", type=int, default=5,
         help="Unique filled prompts to generate per template (Phase 3)",
     )
@@ -794,6 +833,21 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Parse --length-weights "20,30,35,15" → tuple[float, ...]
+    if args.length_weights is not None:
+        try:
+            parsed = tuple(float(x.strip()) for x in args.length_weights.split(","))
+        except ValueError:
+            import sys
+            print(f"Error: --length-weights must be comma-separated numbers, got: {args.length_weights}", file=sys.stderr)
+            sys.exit(1)
+        if len(parsed) != 4:
+            import sys
+            print(f"Error: --length-weights must have exactly 4 values (terse,short,medium,long), got {len(parsed)}", file=sys.stderr)
+            sys.exit(1)
+        args.length_weights = parsed
+    # args.length_weights is now tuple[float,...] | None
 
     # Resolve API key from file
     if args.api_key and os.path.isfile(args.api_key):
