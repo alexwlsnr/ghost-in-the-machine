@@ -74,6 +74,8 @@ function makeMatmulDispatch(api, sec, base) {
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int4')
             api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        else if (s.dtype === 'bfloat16')
+            api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
         else
             api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
     };
