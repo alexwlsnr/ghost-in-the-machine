@@ -124,11 +124,14 @@ _REJECT_PATTERNS: list[re.Pattern] = [
     ]
 ]
 
-# Default targets per stratum
+# Default targets per stratum.
+# meta and jokes are excluded from SODA sourcing (0) — SODA's versions are
+# character-specific dialogue, not AI self-description or joke setups.
+# Supply these via the `supplement` parameter using distilled/generated pairs.
 DEFAULT_TARGETS: dict[str, int] = {
     "greetings":  400,
-    "meta":       250,
-    "jokes":      500,
+    "meta":         0,   # source from distilled only — see supplement param
+    "jokes":        0,   # source from distilled only — SODA has ~18 in 100K
     "emotional":  500,
     "opinions":   400,
     "reactions":  350,
@@ -164,14 +167,22 @@ def classify(query: str, response: str) -> Optional[str]:
 def sample_strata(
     pairs: list[tuple[str, str]],
     targets: Optional[dict[str, int]] = None,
+    supplement: Optional[dict[str, list[tuple[str, str]]]] = None,
     seed: int = 42,
 ) -> list[tuple[str, str, str]]:
-    """Classify pairs, sample up to `targets[stratum]` from each.
+    """Classify SODA pairs into strata and sample up to `targets[stratum]` each.
+
+    supplement: stratum → list of (q, r) pairs from external sources (e.g.
+      distilled data). For strata with target=0, supplement pairs are used
+      exclusively. For other strata, supplement pairs fill remaining capacity
+      after SODA pairs are exhausted.
 
     Returns list of (query, response, stratum) tuples, shuffled.
     """
     if targets is None:
         targets = DEFAULT_TARGETS
+    if supplement is None:
+        supplement = {}
 
     buckets: dict[str, list[tuple[str, str]]] = {s: [] for s in targets}
     rng = random.Random(seed)
@@ -183,10 +194,19 @@ def sample_strata(
 
     result: list[tuple[str, str, str]] = []
     for stratum, target in targets.items():
-        pool = buckets[stratum]
-        rng.shuffle(pool)
-        for q, r in pool[:target]:
-            result.append((q, r, stratum))
+        extra = list(supplement.get(stratum, []))
+        rng.shuffle(extra)
+
+        if target == 0:
+            # This stratum is supplement-only — don't pull from SODA at all
+            for q, r in extra:
+                result.append((q, r, stratum))
+        else:
+            pool = buckets[stratum]
+            rng.shuffle(pool)
+            combined = pool[:target] + extra[:max(0, target - len(pool))]
+            for q, r in combined[:target]:
+                result.append((q, r, stratum))
 
     rng.shuffle(result)
     return result

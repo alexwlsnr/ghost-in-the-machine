@@ -77,6 +77,35 @@ class ClassifyPair(unittest.TestCase):
         self.assertEqual(ss.classify("HOW ARE YOU?", "DOING GREAT!"), "greetings")
 
 
+class SampleStrataSupplementing(unittest.TestCase):
+
+    def test_supplement_replaces_soda_for_stratum(self):
+        # target=0 means supplement-only for that stratum — SODA pairs are not used
+        soda_pairs = [("WHO ARE YOU", "I AM A SODA CHARACTER")]  # SODA meta — wrong
+        distilled_meta = [("WHO ARE YOU", "IM AN AI ASSISTANT HERE TO HELP!")]
+        result = ss.sample_strata(
+            soda_pairs,
+            targets={"meta": 0},  # 0 = supplement-only, no SODA
+            supplement={"meta": distilled_meta},
+        )
+        responses = [r for _, r, _ in result]
+        self.assertIn("IM AN AI ASSISTANT HERE TO HELP!", responses)
+        self.assertNotIn("I AM A SODA CHARACTER", responses)
+
+    def test_supplement_adds_to_soda_when_soda_has_capacity(self):
+        # For other strata, supplement extends SODA up to target
+        soda_pairs = [("HELLO", "HI!")]
+        extra = [("HEY", "HOWDY!")]
+        result = ss.sample_strata(
+            soda_pairs,
+            targets={"greetings": 5},
+            supplement={"greetings": extra},
+        )
+        qs = [q for q, _, _ in result]
+        self.assertIn("HELLO", qs)
+        self.assertIn("HEY", qs)
+
+
 class SampleStrata(unittest.TestCase):
 
     def _make_pairs(self, labels_and_pairs):
@@ -93,9 +122,15 @@ class SampleStrata(unittest.TestCase):
         self.assertLessEqual(counts.get("greetings", 0), 2)
 
     def test_includes_all_strata_present(self):
-        pairs = [("HELLO", "HI!"), ("TELL ME A JOKE", "WHY DID..."),
-                 ("I'M SAD", "SORRY!"), ("WHO ARE YOU", "AN AI!")]
-        result = ss.sample_strata(pairs)
+        # meta and jokes have target=0 in defaults, so need supplement to appear
+        pairs = [("HELLO", "HI!"), ("I'M SAD", "SORRY!")]
+        result = ss.sample_strata(
+            pairs,
+            supplement={
+                "jokes": [("TELL ME A JOKE", "WHY DID THE CHICKEN CROSS?")],
+                "meta":  [("WHO ARE YOU", "AN AI ASSISTANT!")],
+            }
+        )
         strata_found = {s for _, _, s in result}
         self.assertIn("greetings", strata_found)
         self.assertIn("jokes", strata_found)
@@ -103,13 +138,18 @@ class SampleStrata(unittest.TestCase):
         self.assertIn("meta", strata_found)
 
     def test_output_is_shuffled_not_stratum_grouped(self):
-        # With enough pairs the output shouldn't be all one stratum first
         import random; random.seed(0)
-        pairs = [("HELLO", "HI!"), ("HI", "HEY!"), ("TELL ME A JOKE", "WHY DID..."),
-                 ("KNOCK KNOCK", "WHO?"), ("I'M SAD", "SORRY!"), ("WHO ARE YOU", "AN AI!")]
-        result = ss.sample_strata(pairs, seed=42)
+        pairs = [("HELLO", "HI!"), ("HI", "HEY!"), ("I'M SAD", "SORRY!"),
+                 ("NOT MUCH", "SAME!"), ("ISN'T IT?", "TOTALLY!")]
+        result = ss.sample_strata(
+            pairs,
+            supplement={
+                "jokes": [("TELL ME A JOKE", "WHY DID THE CHICKEN?")],
+                "meta":  [("WHO ARE YOU", "AN AI!")],
+            },
+            seed=42,
+        )
         strata_sequence = [s for _, _, s in result]
-        # Should not be sorted/grouped
         self.assertFalse(strata_sequence == sorted(strata_sequence),
                          "Output should not be stratum-sorted")
 
