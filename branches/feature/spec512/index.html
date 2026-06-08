@@ -756,7 +756,9 @@ input.addEventListener('keydown', async (e) => {
   console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
 
   try {
-    for await (const step of generate(activeModel(), query, 160, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
+    // Larger models on longer contexts can ramble — cap response length per model
+    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 80 : 160);
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
       if (step.done) break;
 
       // Replace thinking indicator with response on first token
