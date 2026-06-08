@@ -391,6 +391,7 @@
       <span id="temp-value">0.8</span>
       <button id="temp-up" class="temp-btn">▸</button>
     </div>
+    <button id="clear-btn" class="temp-btn" style="margin-left:12px;color:#33ff3366;border-color:#33ff3322;" title="Clear conversation history">CLR</button>
   </div>
 </div>
 
@@ -398,7 +399,7 @@
 // Code files (tiny) — always fresh to avoid stale-cache bugs.
 // Model weights — versioned so they cache between reloads.
 const _t = Date.now();
-const { loadModel, encode, generate, createCache, detectSIMD } = await import('./tier2_transformer.js?t=' + _t);
+const { loadModel, encode, generate, createCache, detectSIMD, buildContextTokens } = await import('./tier2_transformer.js?t=' + _t);
 
 // Detect SIMD support; track whether it's currently enabled (toggleable)
 const simdSupported = await detectSIMD();
@@ -430,6 +431,7 @@ const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
 let registry   = [];
 let modelCache = {};
 let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
+let histories  = {};   // id → Turn[] — conversation history per model (ctx≥256 only)
 let activeId   = null;
 let isSwitching = false;
 
@@ -746,10 +748,13 @@ input.addEventListener('keydown', async (e) => {
   const startTime = performance.now();
   let tokenCount = 0;
   const m = activeModel();
-  console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| cache:', !!kvCaches[activeId]);
+  const reg = registry.find(r => r.id === activeId);
+  // Only pass history for models with enough context window to benefit
+  const history = (reg && reg.ctx >= 256) ? (histories[activeId] || []) : undefined;
+  console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
 
   try {
-    for await (const step of generate(activeModel(), query, 160, temperature, Math.random, kvCaches[activeId])) {
+    for await (const step of generate(activeModel(), query, 160, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
       if (step.done) break;
 
       // Replace thinking indicator with response on first token
@@ -796,11 +801,30 @@ input.addEventListener('keydown', async (e) => {
     if (respEl) respEl.textContent = trimmed;
   }
 
+  // Record this exchange in conversation history (ctx≥256 models only)
+  if (history !== undefined && response) {
+    histories[activeId] = histories[activeId] || [];
+    histories[activeId].push({ q: query.toUpperCase(), r: response });
+    if (histories[activeId].length > 20) histories[activeId].shift();
+  }
+
   const elapsed = performance.now() - startTime;
   const tokPerSec = elapsed > 0 ? (tokenCount * 1000 / elapsed).toFixed(1) : 0;
-  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)`;
+  const histLen = histories[activeId]?.length ?? 0;
+  const histInfo = histLen > 0 ? ` · ${histLen} turn${histLen > 1 ? 's' : ''} ctx` : '';
+  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)${histInfo}`;
 
   setInputEnabled(true);
+});
+
+// ── Clear conversation history ────────────────────────────────────────────
+document.getElementById('clear-btn').addEventListener('click', () => {
+  if (activeId) histories[activeId] = [];
+  terminal.innerHTML = '';
+  appendLine('HISTORY CLEARED.', 'boot');
+  appendLine('', '');
+  appendLine('READY. ENTER QUERY:', 'ready');
+  input.focus();
 });
 
 // ── Global key capture — route printable keys to the input ───────────────
