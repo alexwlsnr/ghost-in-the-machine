@@ -62,14 +62,14 @@ test('generate() is reproducible given a seeded RNG', async () => {
   assert.equal(a, b);
 });
 
-// Golden decoded outputs — captured from the current bundle at seed 777, temp 1.0.
-// The model + weights don't change during pre-work, so these must stay identical;
-// any drift means the serializer / forward / generate rework altered behavior.
+// Golden decoded outputs — Wisp v3 (SEP-trained) at seed 777, temp 1.0.
+// Updated when: model retrained (v3, with Q/R separator), SEP injected in
+// generate(), or reference bundle changed.
 const GOLDEN = [
-  ['HELLO', 'HEY WHATS UP? HOWS YOUR DAY GOING SO FAR?'],
-  ['TELL ME A JOKE', 'WHY DID THE SCARECROW WIN AN AWARD? BECAUSE HE WA'],
-  ['GOODBYE', 'TAKE CARE AND TALK TO YOU SOON!'],
-  ['HOW ARE YOU', 'IM DOING GREAT THANKS FOR ASKING! JUST HANGING OUT A'],
+  ['HELLO',          "HEY WHATS UP? HOWS YOUR DAY GOING SO FAR?"],
+  ['TELL ME A JOKE', "HEY THERE! HOW'S IT GOING?"],
+  ['GOODBYE',        'TAKE CARE AND TALK TO YOU SOON!'],
+  ['HOW ARE YOU',    'HELLO THERE! DOING GREAT TODAY.'],
 ];
 
 test('generate() reproduces the golden decoded outputs', async () => {
