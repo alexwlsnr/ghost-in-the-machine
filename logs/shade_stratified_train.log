@@ -1,0 +1,38 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+Loaded 11807 training pairs
+Device: cuda
+Training on 11807 pairs, 600 epochs
+Sequences — train: 11216, val: 590
+Parameters: 10,894,848
+Mixed precision: bf16 autocast enabled
+  Epoch    5/600: loss=1.0971, acc=0.660, val_loss=0.9822
+  Epoch   10/600: loss=0.9265, acc=0.708, val_loss=0.8618
+  Epoch   15/600: loss=0.8514, acc=0.730, val_loss=0.8169
+  Epoch   20/600: loss=0.8055, acc=0.743, val_loss=0.7878
+  Epoch   25/600: loss=0.7691, acc=0.753, val_loss=0.7729
+  Epoch   30/600: loss=0.7392, acc=0.761, val_loss=0.7647
+  Epoch   35/600: loss=0.7150, acc=0.768, val_loss=0.7528
+  Epoch   40/600: loss=0.6916, acc=0.775, val_loss=0.7543
+  Epoch   45/600: loss=0.6717, acc=0.781, val_loss=0.7517
+  Epoch   50/600: loss=0.6540, acc=0.786, val_loss=0.7467
+  Epoch   55/600: loss=0.6379, acc=0.790, val_loss=0.7464
+  Epoch   60/600: loss=0.6212, acc=0.795, val_loss=0.7572
+  Epoch   65/600: loss=0.6064, acc=0.800, val_loss=0.7489
+  Epoch   70/600: loss=0.5929, acc=0.804, val_loss=0.7574
+  Epoch   75/600: loss=0.5785, acc=0.808, val_loss=0.7573
+  Epoch   80/600: loss=0.5669, acc=0.811, val_loss=0.7633
+  Epoch   85/600: loss=0.5544, acc=0.815, val_loss=0.7727
+  Epoch   90/600: loss=0.5427, acc=0.818, val_loss=0.7685
+  Epoch   95/600: loss=0.5324, acc=0.821, val_loss=0.7724
+
+Early stop at epoch 98 (no val improvement for 40 epochs)
+
+Best acc: 0.793 at epoch 58
+
+Sample generations:
+  HELLO                → , THANKS. I WANTED TO TALK TO YOU ABOUT SOMETHING 
+  HOW ARE YOU          → I WAS GOING GOOD. I GOT A LOT DONE.
+  TELL ME A JOKE       → WHY DID THE BONES GO TO THE TRETTING MAKES YOU THI
+  WHO ARE YOU          → I PROCESS INFORMATION AND HERE VERY COME BIRD!
+  THANKS               → ANY, I'M REALLY HAPPY WITH HOW IT TURNED OUT.

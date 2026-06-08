@@ -1,0 +1,15 @@
+{
+  "epoch": 98,
+  "epochs_total": 600,
+  "train_loss": 0.526778,
+  "val_loss": 0.779134,
+  "best_val_loss": 0.739963,
+  "best_epoch": 58,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3312293,
+  "checkpoint": "ckpt/shade_stratified.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-08T11:06:10Z",
+  "started_at": "2026-06-08T11:01:35Z"
+}
