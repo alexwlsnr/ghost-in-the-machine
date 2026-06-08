@@ -2,6 +2,7 @@
  * Tier 2.5 Ghost Transformer — Float32 Orchestrator (fixed lengths)
  */
 const PAD = 256;
+const SEP = 1; // ASCII SOH — query/response separator (matches Python SEP_TOKEN)
 const EOS = 257;
 async function fetchBuf(url) {
     const r = await fetch(url);
@@ -334,7 +335,9 @@ export function sampleFromLogits(logits, temp, topK, topP, rand) {
 export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1;
-    const tokens = encode(prompt.toUpperCase()).slice(0, win);
+    // Inject SEP after the prompt — puts the model in "response zone" so it
+    // generates R directly. Matches Python generate() which does the same.
+    const tokens = [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
     // -- Cached path ----------------------------------------------------
     if (cache !== undefined) {
         cache.length = 0;
@@ -350,7 +353,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
                 yield { char: '', token: next, done: true };
                 return;
             }
-            yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
+            yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
             logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
         }
         yield { char: '', token: PAD, done: true };
