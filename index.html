@@ -17,13 +17,13 @@
     color: #33ff33;
     font-family: 'VT323', 'Courier New', monospace;
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
   #screen {
     width: 100vw;
-    height: 100vh;
+    height: 100dvh;
     background: #0c0c0c;
     display: flex;
     flex-direction: column;
@@ -282,6 +282,79 @@
   }
 
   .hidden { display: none !important; }
+
+  /* ── Mobile ─────────────────────────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    /* Use dynamic viewport height so iOS browser chrome doesn't clip content */
+    body, #screen {
+      height: 100dvh;
+    }
+
+    /* Model switcher: scroll horizontally instead of wrapping */
+    #model-switcher {
+      padding: 6px 12px;
+      gap: 6px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;           /* Firefox */
+      -webkit-overflow-scrolling: touch;
+    }
+    #model-switcher::-webkit-scrollbar { display: none; }
+
+    #switcher-label { font-size: 14px; }
+
+    .model-chip {
+      font-size: 16px;
+      padding: 2px 8px;
+      flex-shrink: 0;                  /* prevent chips collapsing in scroll container */
+    }
+
+    .chip-load-btn { font-size: 14px; }
+    .chip-soon     { display: none; } /* saves space; "coming soon" understood */
+
+    /* Terminal */
+    #terminal {
+      padding: 12px;
+      font-size: 22px;
+    }
+    #terminal .stats { font-size: 14px; }
+
+    /* Input line */
+    #input-line {
+      flex: 0 0 54px;
+      padding: 0 12px;
+    }
+
+    #prompt-marker { font-size: 22px; margin-right: 8px; }
+
+    #query-input { font-size: 22px; } /* ≥16px prevents iOS auto-zoom on focus */
+
+    /* Hide TEMP label to free width; keep +/- buttons and value */
+    #temp-label  { display: none; }
+    #temp-group  { gap: 4px; margin-left: 10px; }
+    #temp-value  { font-size: 18px; min-width: 28px; }
+    .temp-btn    { font-size: 16px; padding: 4px 10px; } /* larger touch target */
+
+    /* Status bar */
+    #status-bar {
+      flex: 0 0 26px;
+      padding: 0 12px;
+      font-size: 14px;
+    }
+
+    #model-info {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 55%;
+    }
+
+    #simd-badge, #mem-badge { font-size: 12px; padding: 2px 6px; }
+
+    /* Loading overlay */
+    #loading-overlay { font-size: 20px; }
+    #loading-bar     { width: 82%; }
+  }
 </style>
 </head>
 <body>
@@ -306,6 +379,7 @@
   <div id="status-bar">
     <span id="model-info">---</span>
     <button id="simd-badge" style="display:none;font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #00ffff44;color:#00ffff;" title="Toggle SIMD kernel">⚡ SIMD</button>
+    <button id="mem-badge" style="font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #33ff3322;color:#33ff3344;" title="Enable conversation memory for all models (experimental on ctx=128)">○ MEM</button>
     <span id="perf-info">---</span>
   </div>
 
@@ -318,6 +392,7 @@
       <span id="temp-value">0.8</span>
       <button id="temp-up" class="temp-btn">▸</button>
     </div>
+    <button id="clear-btn" class="temp-btn" style="margin-left:12px;color:#33ff3366;border-color:#33ff3322;" title="Clear conversation history">CLR</button>
   </div>
 </div>
 
@@ -325,7 +400,7 @@
 // Code files (tiny) — always fresh to avoid stale-cache bugs.
 // Model weights — versioned so they cache between reloads.
 const _t = Date.now();
-const { loadModel, encode, generate, createCache, detectSIMD } = await import('./tier2_transformer.js?t=' + _t);
+const { loadModel, encode, generate, createCache, detectSIMD, buildContextTokens } = await import('./tier2_transformer.js?t=' + _t);
 
 // Detect SIMD support; track whether it's currently enabled (toggleable)
 const simdSupported = await detectSIMD();
@@ -357,6 +432,8 @@ const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
 let registry   = [];
 let modelCache = {};
 let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
+let histories  = {};   // id → Turn[] — conversation history per model
+let memoryOn   = false; // off by default — multi-turn training needs more data before enabling
 let activeId   = null;
 let isSwitching = false;
 
@@ -673,10 +750,15 @@ input.addEventListener('keydown', async (e) => {
   const startTime = performance.now();
   let tokenCount = 0;
   const m = activeModel();
-  console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| cache:', !!kvCaches[activeId]);
+  const reg = registry.find(r => r.id === activeId);
+  // MEM toggle controls history injection for all models
+  const history = memoryOn ? (histories[activeId] || []) : undefined;
+  console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
 
   try {
-    for await (const step of generate(activeModel(), query, 160, temperature, Math.random, kvCaches[activeId])) {
+    // Larger models on longer contexts can ramble — cap response length per model
+    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 80 : 160);
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
       if (step.done) break;
 
       // Replace thinking indicator with response on first token
@@ -723,11 +805,54 @@ input.addEventListener('keydown', async (e) => {
     if (respEl) respEl.textContent = trimmed;
   }
 
+  // Record this exchange in conversation history (ctx≥256 models only)
+  if (history !== undefined && response) {
+    histories[activeId] = histories[activeId] || [];
+    histories[activeId].push({ q: query.toUpperCase(), r: response });
+    if (histories[activeId].length > 20) histories[activeId].shift();
+  }
+
   const elapsed = performance.now() - startTime;
   const tokPerSec = elapsed > 0 ? (tokenCount * 1000 / elapsed).toFixed(1) : 0;
-  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)`;
+  const histLen = histories[activeId]?.length ?? 0;
+  const histInfo = histLen > 0 ? ` · ${histLen} turn${histLen > 1 ? 's' : ''} ctx` : '';
+  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)${histInfo}`;
 
   setInputEnabled(true);
+});
+
+// ── Memory mode toggle ────────────────────────────────────────────────────
+const memBadge = document.getElementById('mem-badge');
+function updateMemBadge() {
+  memBadge.textContent       = memoryOn ? '● MEM ON' : '○ MEM';
+  memBadge.style.color       = memoryOn ? '#33ff33'   : '#33ff3344';
+  memBadge.style.borderColor = memoryOn ? '#33ff3388' : '#33ff3322';
+  memBadge.style.background  = memoryOn ? '#33ff3311' : 'transparent';
+  memBadge.title             = memoryOn
+    ? 'Memory ON — click to disable (all models)'
+    : 'Memory OFF — click to enable (experimental on Wisp/Shade)';
+}
+memBadge.addEventListener('click', () => {
+  memoryOn = !memoryOn;
+  updateMemBadge();
+  if (memoryOn) {
+    appendLine('MEMORY: ON — previous exchanges injected as context (experimental)', 'boot');
+  } else {
+    appendLine('MEMORY: OFF', 'boot');
+    // Clear all histories when turning memory off
+    histories = {};
+  }
+  input.focus();
+});
+
+// ── Clear conversation history ────────────────────────────────────────────
+document.getElementById('clear-btn').addEventListener('click', () => {
+  if (activeId) histories[activeId] = [];
+  terminal.innerHTML = '';
+  appendLine('HISTORY CLEARED.', 'boot');
+  appendLine('', '');
+  appendLine('READY. ENTER QUERY:', 'ready');
+  input.focus();
 });
 
 // ── Global key capture — route printable keys to the input ───────────────
