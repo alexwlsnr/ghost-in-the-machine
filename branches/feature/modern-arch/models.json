@@ -1,0 +1,127 @@
+{
+  "models": [
+    {
+      "id": "wisp-8bit",
+      "name": "Wisp",
+      "description": "3.3M params · 3.6MB · instant load",
+      "bin": "model_wisp_8bit.bin",
+      "json": "model_wisp_8bit.json",
+      "size_mb": 3.6,
+      "params": "3.3M",
+      "ctx": 128,
+      "default": true,
+      "available": true
+    },
+    {
+      "id": "wisp-fp32",
+      "name": "Wisp fp32",
+      "description": "3.3M params · 13MB · reference",
+      "bin": "model_wisp_fp32.bin",
+      "json": "model_wisp_fp32.json",
+      "size_mb": 13,
+      "params": "3.3M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "shade-fp32",
+      "name": "Shade fp32",
+      "description": "10.9M params · 42MB · reference",
+      "bin": "model_shade_fp32.bin",
+      "json": "model_shade_fp32.json",
+      "size_mb": 42,
+      "params": "10.9M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "shade-bf16",
+      "name": "Shade bf16",
+      "description": "10.9M params · 22MB · near-lossless",
+      "bin": "model_shade_bf16.bin",
+      "json": "model_shade_bf16.json",
+      "size_mb": 22,
+      "params": "10.9M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "shade-8bit",
+      "name": "Shade 8-bit",
+      "description": "10.9M params · 11MB · click to load",
+      "bin": "model_shade_8bit.bin",
+      "json": "model_shade_8bit.json",
+      "size_mb": 11,
+      "params": "10.9M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "shade-4bit",
+      "name": "Shade 4-bit",
+      "description": "10.9M params · 6MB · grouped quant",
+      "bin": "model_shade_4bit.bin",
+      "json": "model_shade_4bit.json",
+      "size_mb": 6,
+      "params": "10.9M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "spec512",
+      "name": "Spec512",
+      "description": "27.6M params · 27MB · multi-turn · ctx 1024",
+      "bin": "model_spec512_8bit.bin",
+      "json": "model_spec512_8bit.json",
+      "size_mb": 27,
+      "params": "27.6M",
+      "ctx": 1024,
+      "max_new": 80,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "spec512-4bit",
+      "name": "Spec512 4-bit",
+      "description": "27.6M params · 18MB · grouped quant · ctx 1024",
+      "bin": "model_spec512_4bit.bin",
+      "json": "model_spec512_4bit.json",
+      "size_mb": 18,
+      "params": "27.6M",
+      "ctx": 1024,
+      "max_new": 80,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "spec512-fp32",
+      "name": "Spec512 fp32",
+      "description": "27.6M params · 99MB · reference",
+      "bin": "model_spec512_fp32.bin",
+      "json": "model_spec512_fp32.json",
+      "size_mb": 99,
+      "params": "27.6M",
+      "ctx": 1024,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "spec512-v1.1",
+      "name": "Spec512 v1.1",
+      "description": "27.6M params · 27MB · retrained · ctx 1024",
+      "bin": "model_spec512_v1.1_8bit.bin",
+      "json": "model_spec512_v1.1_8bit.json",
+      "size_mb": 27,
+      "params": "27.6M",
+      "ctx": 1024,
+      "max_new": 80,
+      "default": false,
+      "available": false
+    }
+  ]
+}

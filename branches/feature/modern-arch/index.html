@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Ghost in the Machine — Tier 2.5</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0a;
+    color: #33ff33;
+    font-family: 'VT323', 'Courier New', monospace;
+    width: 100vw;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  #screen {
+    width: 100vw;
+    height: 100dvh;
+    background: #0c0c0c;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    box-shadow: inset 0 0 60px rgba(0,0,0,0.8);
+  }
+
+  #scanlines {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      transparent 0px,
+      transparent 2px,
+      rgba(0,0,0,0.3) 2px,
+      rgba(0,0,0,0.3) 4px
+    );
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  /* Bars sit above scanlines and have solid backgrounds to block them */
+  #model-switcher, #status-bar, #input-line {
+    position: relative;
+    z-index: 15;
+  }
+
+  /* ── Model switcher bar ── */
+  #model-switcher {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 8px 24px;
+    gap: 8px;
+    border-bottom: 1px solid #33ff3322;
+    background: #0d1a0d;
+    flex-wrap: wrap;
+  }
+
+  #switcher-label {
+    color: #33ff3355;
+    font-size: 17px;
+    letter-spacing: 1px;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .model-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 19px;
+    padding: 2px 10px;
+    border: 1px solid #33ff3333;
+    background: transparent;
+    cursor: default;
+    line-height: 1.4;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .model-chip.active {
+    border-color: #33ff33;
+    color: #33ff33;
+    background: #33ff3311;
+  }
+
+  .model-chip.unavailable {
+    border-color: #33ff3318;
+    color: #33ff3333;
+  }
+
+  .model-chip.available-unloaded {
+    border-color: #33ff3344;
+    color: #33ff3377;
+  }
+
+  .model-chip.loading-chip {
+    border-color: #ffaa0088;
+    color: #ffaa00;
+  }
+
+  .chip-load-btn {
+    background: none;
+    border: 1px solid #33ff3355;
+    color: #33ff3388;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 16px;
+    padding: 0 6px;
+    cursor: pointer;
+    line-height: 1.4;
+  }
+
+  .chip-load-btn:hover { background: #33ff3311; color: #33ff33; border-color: #33ff33; }
+
+  .chip-soon {
+    font-size: 12px;
+    color: #33ff3333;
+    letter-spacing: 0.5px;
+  }
+
+  .chip-progress {
+    display: inline-block;
+    width: 60px;
+    height: 4px;
+    background: #222;
+    vertical-align: middle;
+    overflow: hidden;
+  }
+
+  .chip-progress-fill {
+    height: 100%;
+    background: #ffaa00;
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  /* ── Terminal ── */
+  #terminal {
+    flex: 1 1 auto;
+    padding: 24px;
+    overflow-y: auto;
+    font-size: 28px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  #terminal .boot { color: #888; }
+  #terminal .ready { color: #33ff33; }
+  #terminal .prompt { color: #ffaa00; }
+  #terminal .response { color: #66ff66; }
+  #terminal .error { color: #ff3333; }
+  #terminal .stats { color: #555; font-size: 18px; }
+  #terminal .switch-msg { color: #ffaa00; }
+
+  /* ── Input line ── */
+  #input-line {
+    flex: 0 0 58px;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    border-top: 1px solid #33ff3322;
+  }
+
+  #prompt-marker {
+    color: #ffaa00;
+    margin-right: 10px;
+    font-size: 28px;
+  }
+
+  #query-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #fff;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 28px;
+    outline: none;
+    caret-color: #33ff33;
+    text-transform: uppercase;
+    min-width: 0;
+  }
+
+  #temp-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 16px;
+    flex-shrink: 0;
+  }
+
+  #temp-label {
+    color: #33ff3388;
+    font-size: 18px;
+    user-select: none;
+  }
+
+  #temp-value {
+    color: #33ff33;
+    font-size: 22px;
+    min-width: 36px;
+    text-align: center;
+    user-select: none;
+  }
+
+  .temp-btn {
+    background: none;
+    border: 1px solid #33ff3344;
+    color: #33ff33;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 18px;
+    padding: 2px 6px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .temp-btn:hover { background: #33ff3311; }
+  .temp-btn:active { background: #33ff3322; }
+
+  #query-input::placeholder {
+    text-transform: none;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  .thinking {
+    color: #33ff33;
+    animation: pulse 0.8s ease-in-out infinite;
+  }
+
+  /* ── Status bar ── */
+  #status-bar {
+    flex: 0 0 30px;
+    background: #0d1a0d;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    font-size: 18px;
+    color: #33ff3388;
+    justify-content: space-between;
+    border-top: 1px solid #33ff3322;
+  }
+
+  /* ── Loading overlay ── */
+  #loading-overlay {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #0a0a0a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 20;
+    font-size: 26px;
+  }
+
+  #loading-bar {
+    width: 300px;
+    height: 4px;
+    background: #222;
+    margin-top: 16px;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  #loading-fill {
+    height: 100%;
+    background: #33ff33;
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  .hidden { display: none !important; }
+
+  /* ── Mobile ─────────────────────────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    /* Use dynamic viewport height so iOS browser chrome doesn't clip content */
+    body, #screen {
+      height: 100dvh;
+    }
+
+    /* Model switcher: scroll horizontally instead of wrapping */
+    #model-switcher {
+      padding: 6px 12px;
+      gap: 6px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;           /* Firefox */
+      -webkit-overflow-scrolling: touch;
+    }
+    #model-switcher::-webkit-scrollbar { display: none; }
+
+    #switcher-label { font-size: 14px; }
+
+    .model-chip {
+      font-size: 16px;
+      padding: 2px 8px;
+      flex-shrink: 0;                  /* prevent chips collapsing in scroll container */
+    }
+
+    .chip-load-btn { font-size: 14px; }
+    .chip-soon     { display: none; } /* saves space; "coming soon" understood */
+
+    /* Terminal */
+    #terminal {
+      padding: 12px;
+      font-size: 22px;
+    }
+    #terminal .stats { font-size: 14px; }
+
+    /* Input line */
+    #input-line {
+      flex: 0 0 54px;
+      padding: 0 12px;
+    }
+
+    #prompt-marker { font-size: 22px; margin-right: 8px; }
+
+    #query-input { font-size: 22px; } /* ≥16px prevents iOS auto-zoom on focus */
+
+    /* Hide TEMP label to free width; keep +/- buttons and value */
+    #temp-label  { display: none; }
+    #temp-group  { gap: 4px; margin-left: 10px; }
+    #temp-value  { font-size: 18px; min-width: 28px; }
+    .temp-btn    { font-size: 16px; padding: 4px 10px; } /* larger touch target */
+
+    /* Status bar */
+    #status-bar {
+      flex: 0 0 26px;
+      padding: 0 12px;
+      font-size: 14px;
+    }
+
+    #model-info {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 55%;
+    }
+
+    #simd-badge, #mem-badge { font-size: 12px; padding: 2px 6px; }
+
+    /* Loading overlay */
+    #loading-overlay { font-size: 20px; }
+    #loading-bar     { width: 82%; }
+  }
+</style>
+</head>
+<body>
+
+<div id="screen">
+  <div id="scanlines"></div>
+
+  <div id="loading-overlay">
+    <div id="loading-title">INITIALIZING GHOST...</div>
+    <div id="loading-bar"><div id="loading-fill"></div></div>
+    <div id="loading-text" style="margin-top:8px;font-size:14px;color:#888;"></div>
+  </div>
+
+  <!-- Model switcher bar (between header and terminal) -->
+  <div id="model-switcher">
+    <span id="switcher-label">MODEL:</span>
+    <!-- chips rendered dynamically -->
+  </div>
+
+  <div id="terminal"></div>
+
+  <div id="status-bar">
+    <span id="model-info">---</span>
+    <button id="simd-badge" style="display:none;font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #00ffff44;color:#00ffff;" title="Toggle SIMD kernel">⚡ SIMD</button>
+    <button id="mem-badge" style="font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #33ff3322;color:#33ff3344;" title="Enable conversation memory for all models (experimental on ctx=128)">○ MEM</button>
+    <span id="perf-info">---</span>
+  </div>
+
+  <div id="input-line">
+    <span id="prompt-marker">></span>
+    <input id="query-input" type="text" placeholder="TYPE YOUR QUERY..." autofocus disabled>
+    <div id="temp-group">
+      <span id="temp-label">TEMP</span>
+      <button id="temp-down" class="temp-btn">◂</button>
+      <span id="temp-value">0.8</span>
+      <button id="temp-up" class="temp-btn">▸</button>
+    </div>
+    <button id="clear-btn" class="temp-btn" style="margin-left:12px;color:#33ff3366;border-color:#33ff3322;" title="Clear conversation history">CLR</button>
+  </div>
+</div>
+
+<script type="module">
+// Code files (tiny) — always fresh to avoid stale-cache bugs.
+// Model weights — versioned so they cache between reloads.
+const _t = Date.now();
+const { loadModel, encode, generate, createCache, detectSIMD, buildContextTokens } = await import('./tier2_transformer.js?t=' + _t);
+
+// Detect SIMD support; track whether it's currently enabled (toggleable)
+const simdSupported = await detectSIMD();
+let simdEnabled = simdSupported;
+
+function activeWasmFile() {
+  return (simdEnabled && simdSupported)
+    ? './tier2_kernel_simd.wasm?t=' + _t
+    : './tier2_kernel.wasm?t=' + _t;
+}
+
+const terminal    = document.getElementById('terminal');
+const input       = document.getElementById('query-input');
+const loading     = document.getElementById('loading-overlay');
+const loadingFill = document.getElementById('loading-fill');
+const loadingText = document.getElementById('loading-text');
+const loadingTitle = document.getElementById('loading-title');
+const modelInfo   = document.getElementById('model-info');
+const perfInfo    = document.getElementById('perf-info');
+const switcher    = document.getElementById('model-switcher');
+
+let temperature = 0.8;
+const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
+
+// ── Multi-model state ──────────────────────────────────────────────────────
+// registry: array of model descriptors from models.json
+// modelCache: id → loaded model object (cached after first load)
+// activeId: currently active model id
+let registry   = [];
+let modelCache = {};
+let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
+let histories  = {};   // id → Turn[] — conversation history per model
+let memoryOn   = false; // off by default — multi-turn training needs more data before enabling
+let activeId   = null;
+let isSwitching = false;
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function updateTempDisplay() {
+  document.getElementById('temp-value').textContent = temperature.toFixed(1);
+}
+
+document.getElementById('temp-up').addEventListener('click', () => {
+  const idx = TEMP_PRESETS.indexOf(temperature);
+  if (idx < TEMP_PRESETS.length - 1) { temperature = TEMP_PRESETS[idx + 1]; updateTempDisplay(); }
+});
+document.getElementById('temp-down').addEventListener('click', () => {
+  const idx = TEMP_PRESETS.indexOf(temperature);
+  if (idx > 0) { temperature = TEMP_PRESETS[idx - 1]; updateTempDisplay(); }
+});
+
+function appendLine(text, cls = '') {
+  const div = document.createElement('div');
+  div.className = cls;
+  div.textContent = text;
+  terminal.appendChild(div);
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+function setInputEnabled(enabled) {
+  input.disabled = !enabled;
+  if (enabled) input.focus();
+}
+
+// ── Status bar ────────────────────────────────────────────────────────────
+function updateStatusBar(reg) {
+  if (!reg) { modelInfo.textContent = '---'; return; }
+  modelInfo.textContent = `${reg.name.toUpperCase()} · ${reg.params} params · ${reg.ctx} ctx`;
+}
+
+// ── Model switcher chips ───────────────────────────────────────────────────
+function renderSwitcher() {
+  // Remove all chips (keep the label)
+  const label = document.getElementById('switcher-label');
+  switcher.innerHTML = '';
+  switcher.appendChild(label);
+
+  for (const reg of registry) {
+    const chip = document.createElement('span');
+
+    if (reg.id === activeId) {
+      // Active model
+      chip.className = 'model-chip active';
+      chip.textContent = reg.name.toUpperCase();
+
+    } else if (!reg.available) {
+      // Coming soon
+      chip.className = 'model-chip unavailable';
+      chip.innerHTML = `${reg.name.toUpperCase()} <span class="chip-soon">(coming soon)</span>`;
+
+    } else if (reg._loading) {
+      // Currently loading
+      chip.className = 'model-chip loading-chip';
+      chip.id = `chip-${reg.id}`;
+      const bar = document.createElement('span');
+      bar.className = 'chip-progress';
+      const fill = document.createElement('span');
+      fill.className = 'chip-progress-fill';
+      fill.id = `chip-fill-${reg.id}`;
+      bar.appendChild(fill);
+      chip.textContent = reg.name.toUpperCase() + ' ';
+      chip.appendChild(bar);
+
+    } else {
+      // Available, not loaded yet
+      chip.className = 'model-chip available-unloaded';
+      const btn = document.createElement('button');
+      btn.className = 'chip-load-btn';
+      btn.textContent = `Load ${reg.size_mb}MB`;
+      btn.addEventListener('click', () => switchModel(reg.id));
+      chip.textContent = reg.name.toUpperCase() + ' ';
+      chip.appendChild(btn);
+    }
+
+    switcher.appendChild(chip);
+  }
+}
+
+// ── Switch / load model ───────────────────────────────────────────────────
+async function switchModel(id) {
+  if (id === activeId || isSwitching) return;
+  const reg = registry.find(r => r.id === id);
+  if (!reg || !reg.available) return;
+
+  isSwitching = true;
+  setInputEnabled(false);
+
+  // If cached, activate immediately
+  if (modelCache[id]) {
+    activeId = id;
+    terminal.innerHTML = '';
+    appendLine(`SWITCHING TO ${reg.name.toUpperCase()}...`, 'switch-msg');
+    appendLine('', '');
+    appendLine('READY. ENTER QUERY:', 'ready');
+    updateStatusBar(reg);
+    renderSwitcher();
+    isSwitching = false;
+    setInputEnabled(true);
+    return;
+  }
+
+  // Mark as loading
+  reg._loading = true;
+  renderSwitcher();
+
+  // Show loading overlay for model switch
+  loadingTitle.textContent = `LOADING ${reg.name.toUpperCase()}...`;
+  loadingFill.style.width = '10%';
+  loadingText.textContent = `Fetching ${reg.bin} (${reg.size_mb} MB)...`;
+  loading.classList.remove('hidden');
+
+  try {
+    const loaded = await loadModel({
+      wasm: activeWasmFile(),
+      bin:  modelUrls(reg).bin,
+      json: modelUrls(reg).json,
+      onProgress: (pct) => {
+        loadingFill.style.width = pct + '%';
+        const fill = document.getElementById(`chip-fill-${reg.id}`);
+        if (fill) fill.style.width = pct + '%';
+      },
+    });
+
+    modelCache[id] = loaded;
+    kvCaches[id]   = createCache(loaded);
+    reg._loading = false;
+    activeId = id;
+
+    loadingFill.style.width = '100%';
+    loadingText.textContent = 'Ready.';
+
+    setTimeout(() => {
+      loading.classList.add('hidden');
+      terminal.innerHTML = '';
+      appendLine(`SWITCHING TO ${reg.name.toUpperCase()}...`, 'switch-msg');
+      appendLine('', '');
+      appendLine('READY. ENTER QUERY:', 'ready');
+      updateStatusBar(reg);
+      renderSwitcher();
+      isSwitching = false;
+      setInputEnabled(true);
+    }, 400);
+
+  } catch(e) {
+    reg._loading = false;
+    loading.classList.add('hidden');
+    appendLine(`LOAD ERROR [${reg.name}]: ${e.message}`, 'error');
+    renderSwitcher();
+    isSwitching = false;
+    setInputEnabled(activeId !== null);
+  }
+}
+
+// ── Active model accessor ─────────────────────────────────────────────────
+function activeModel() {
+  return modelCache[activeId] || null;
+}
+
+// Resolve bin/json URLs — prefer bin_url/json_url (GitHub Releases) over local path
+// Always use local paths for now — GitHub Releases doesn't support CORS from browsers.
+// bin_url/json_url in models.json is reserved for future CDN (HuggingFace/R2) integration.
+function modelUrls(reg) {
+  const bin  = `./${reg.bin}?v=1`;
+  const json = `./${reg.json}?v=1`;
+  return { bin, json };
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+async function boot() {
+  // Fetch registry
+  let data;
+  try {
+    const resp = await fetch('./models.json?v=1');
+    data = await resp.json();
+  } catch(e) {
+    appendLine('REGISTRY ERROR: could not load models.json', 'error');
+    loading.classList.add('hidden');
+    return;
+  }
+
+  registry = data.models.map(m => ({ ...m, _loading: false }));
+  const defaultModel = registry.find(r => r.default) || registry[0];
+
+  // SIMD badge — show if supported, wire up toggle
+  const simdBadge = document.getElementById('simd-badge');
+  function updateSimdBadge() {
+    if (!simdSupported) return;
+    simdBadge.style.display     = 'inline';
+    simdBadge.title             = simdEnabled ? 'SIMD ON — click to disable' : 'SIMD OFF — click to enable';
+    simdBadge.style.color       = simdEnabled ? '#00ffff'   : '#33ff3366';
+    simdBadge.style.borderColor = simdEnabled ? '#00ffff88' : '#33ff3333';
+    simdBadge.style.background  = simdEnabled ? '#00ffff11' : 'transparent';
+    simdBadge.textContent       = simdEnabled ? '⚡ SIMD ON' : '○ SIMD OFF';
+  }
+  updateSimdBadge();
+
+  simdBadge.addEventListener('click', () => {
+    if (!simdSupported || isSwitching) return;
+    simdEnabled = !simdEnabled;
+    updateSimdBadge();
+    const prev = activeId;
+    modelCache = {};
+    kvCaches   = {};
+    activeId   = null;  // clear so switchModel doesn't treat it as already-loaded
+    appendLine(`KERNEL: switching to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading...`, 'boot');
+    if (prev) switchModel(prev);
+  });
+
+  // Boot message
+  appendLine('GHOST IN THE MACHINE v2.5 (build 16)', 'ready');
+  appendLine(`Kernel: WebAssembly${simdSupported ? ' + SIMD128 ⚡' : ' (scalar)'}`, 'boot');
+  appendLine('Byte-level Tiny Transformer | Multi-model registry', 'boot');
+  appendLine('', 'boot');
+  appendLine('SELECT MODEL:', 'boot');
+  for (const reg of registry) {
+    const status = reg.available
+      ? (reg.default ? '[DEFAULT]' : '[available]')
+      : '[coming soon]';
+    appendLine(`  ${reg.name.toUpperCase()} — ${reg.description}  ${status}`, 'boot');
+  }
+  appendLine('───────────────────────────────────────────────', 'boot');
+
+  // Render switcher with no active model yet
+  renderSwitcher();
+
+  // Load the default model
+  loadingTitle.textContent = `LOADING ${defaultModel.name.toUpperCase()}...`;
+  loadingFill.style.width = '10%';
+  loadingText.textContent = `Loading ${defaultModel.bin}...`;
+
+  defaultModel._loading = true;
+  renderSwitcher();
+
+  try {
+    const loaded = await loadModel({
+      wasm: activeWasmFile(),
+      bin:  modelUrls(defaultModel).bin,
+      json: modelUrls(defaultModel).json,
+      onProgress: (pct) => { loadingFill.style.width = (10 + pct * 0.9) + '%'; },
+    });
+
+    modelCache[defaultModel.id] = loaded;
+    kvCaches[defaultModel.id]   = createCache(loaded);
+    defaultModel._loading = false;
+    activeId = defaultModel.id;
+
+    loadingFill.style.width = '100%';
+    loadingText.textContent = 'Ready.';
+
+  } catch(e) {
+    defaultModel._loading = false;
+    appendLine(`LOAD ERROR: ${e.message}`, 'error');
+    loading.classList.add('hidden');
+    renderSwitcher();
+    return;
+  }
+
+  const reg = registry.find(r => r.id === activeId);
+  updateStatusBar(reg);
+  renderSwitcher();
+
+  setTimeout(() => {
+    loading.classList.add('hidden');
+    setInputEnabled(true);
+    appendLine('', '');
+    appendLine('READY. ENTER QUERY:', 'ready');
+  }, 500);
+}
+
+// ── Prompt history (shell-style ↑/↓ recall) ──────────────────────────────
+const promptHistory = [];
+let historyIndex = -1;   // -1 = live input, 0 = most recent
+let liveDraft = '';      // saved input while browsing history
+
+// ── Input handler ─────────────────────────────────────────────────────────
+input.addEventListener('keydown', async (e) => {
+  // History navigation
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !input.disabled) {
+    e.preventDefault();
+    if (promptHistory.length === 0) return;
+    if (e.key === 'ArrowUp') {
+      if (historyIndex === -1) liveDraft = input.value;
+      historyIndex = Math.min(historyIndex + 1, promptHistory.length - 1);
+    } else {
+      historyIndex = Math.max(historyIndex - 1, -1);
+    }
+    input.value = historyIndex === -1 ? liveDraft : promptHistory[historyIndex];
+    // Move caret to end
+    setTimeout(() => input.setSelectionRange(input.value.length, input.value.length), 0);
+    return;
+  }
+
+  if (e.key !== 'Enter' || !activeModel() || input.disabled) return;
+
+  const query = input.value.trim();
+  if (!query) return;
+
+  // Push to history, reset index
+  promptHistory.unshift(query.toUpperCase());
+  if (promptHistory.length > 50) promptHistory.pop();
+  historyIndex = -1;
+  liveDraft = '';
+
+  input.value = '';
+  setInputEnabled(false);
+  appendLine(`> ${query.toUpperCase()}`, 'prompt');
+
+  // Thinking indicator — pulses while model processes the prompt
+  const thinkEl = document.createElement('div');
+  thinkEl.className = 'thinking';
+  thinkEl.textContent = '▌';
+  terminal.appendChild(thinkEl);
+  terminal.scrollTop = terminal.scrollHeight;
+
+  perfInfo.textContent = 'THINKING...';
+  let response = '';
+  const startTime = performance.now();
+  let tokenCount = 0;
+  const m = activeModel();
+  const reg = registry.find(r => r.id === activeId);
+  // MEM toggle controls history injection for all models
+  const history = memoryOn ? (histories[activeId] || []) : undefined;
+  console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
+
+  try {
+    // Larger models on longer contexts can ramble — cap response length per model
+    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 80 : 160);
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
+      if (step.done) break;
+
+      // Replace thinking indicator with response on first token
+      if (tokenCount === 0) {
+        thinkEl.remove();
+        perfInfo.textContent = 'GENERATING...';
+      }
+
+      response += step.char;
+      tokenCount++;
+
+      // Update live
+      const lastChild = terminal.lastElementChild;
+      if (lastChild && lastChild.className === 'response') {
+        lastChild.textContent = response;
+      } else {
+        appendLine(response, 'response');
+      }
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+  } catch(e) {
+    thinkEl.remove();
+    console.error('[generate] error:', e);
+    appendLine(`ERROR: ${e.message}`, 'error');
+  }
+
+  // Graceful ending: trim trailing garbage at the context/EOS limit.
+  // Model EOS prediction is imprecise (~2K training examples), so we
+  // trim back to the last likely sentence boundary or word.
+  if (response && !/[.!?]\s*$/.test(response)) {
+    // Find last sentence boundary: . ! ? followed by space or uppercase (new sentence)
+    let best = -1;
+    for (const re of [/[.!?] [A-Z]/g, /[.!?][A-Z]/g]) {
+      let m; while ((m = re.exec(response)) !== null) best = Math.max(best, m.index + 1);
+    }
+    let trimmed = response;
+    if (best > response.length * 0.5) {
+      trimmed = response.slice(0, best + 1);
+    } else {
+      const lastSpace = response.lastIndexOf(' ');
+      if (lastSpace > 0) trimmed = response.slice(0, lastSpace) + '…';
+    }
+    const respEl = Array.from(terminal.children).reverse().find(c => c.className === 'response');
+    if (respEl) respEl.textContent = trimmed;
+  }
+
+  // Record this exchange in conversation history (ctx≥256 models only)
+  if (history !== undefined && response) {
+    histories[activeId] = histories[activeId] || [];
+    histories[activeId].push({ q: query.toUpperCase(), r: response });
+    if (histories[activeId].length > 20) histories[activeId].shift();
+  }
+
+  const elapsed = performance.now() - startTime;
+  const tokPerSec = elapsed > 0 ? (tokenCount * 1000 / elapsed).toFixed(1) : 0;
+  const histLen = histories[activeId]?.length ?? 0;
+  const histInfo = histLen > 0 ? ` · ${histLen} turn${histLen > 1 ? 's' : ''} ctx` : '';
+  perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)${histInfo}`;
+
+  setInputEnabled(true);
+});
+
+// ── Memory mode toggle ────────────────────────────────────────────────────
+const memBadge = document.getElementById('mem-badge');
+function updateMemBadge() {
+  memBadge.textContent       = memoryOn ? '● MEM ON' : '○ MEM';
+  memBadge.style.color       = memoryOn ? '#33ff33'   : '#33ff3344';
+  memBadge.style.borderColor = memoryOn ? '#33ff3388' : '#33ff3322';
+  memBadge.style.background  = memoryOn ? '#33ff3311' : 'transparent';
+  memBadge.title             = memoryOn
+    ? 'Memory ON — click to disable (all models)'
+    : 'Memory OFF — click to enable (experimental on Wisp/Shade)';
+}
+memBadge.addEventListener('click', () => {
+  memoryOn = !memoryOn;
+  updateMemBadge();
+  if (memoryOn) {
+    appendLine('MEMORY: ON — previous exchanges injected as context (experimental)', 'boot');
+  } else {
+    appendLine('MEMORY: OFF', 'boot');
+    // Clear all histories when turning memory off
+    histories = {};
+  }
+  input.focus();
+});
+
+// ── Clear conversation history ────────────────────────────────────────────
+document.getElementById('clear-btn').addEventListener('click', () => {
+  if (activeId) histories[activeId] = [];
+  terminal.innerHTML = '';
+  appendLine('HISTORY CLEARED.', 'boot');
+  appendLine('', '');
+  appendLine('READY. ENTER QUERY:', 'ready');
+  input.focus();
+});
+
+// ── Global key capture — route printable keys to the input ───────────────
+// Skips when: input is disabled, input already has focus, a button has focus,
+// or a modifier key is held (so Ctrl+C on terminal selection still works).
+document.addEventListener('keydown', (e) => {
+  if (input.disabled) return;
+  if (document.activeElement === input) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.length !== 1) return;                 // arrow keys, Tab, Enter, etc.
+  if (document.activeElement?.tagName === 'BUTTON') return;
+  input.focus();
+});
+
+boot();
+</script>
+</body>
+</html>
