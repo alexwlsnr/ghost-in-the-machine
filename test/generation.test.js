@@ -62,16 +62,15 @@ test('generate() is reproducible given a seeded RNG', async () => {
   assert.equal(a, b);
 });
 
-// Golden decoded outputs — Wisp v3 (SEP-trained) at seed 777, temp 1.0.
-// Updated when: model retrained (v3, with Q/R separator), SEP injected in
-// generate(), or reference bundle changed.
+// Golden decoded outputs — Wisp v2_fixed (stratified SODA + meta/jokes distilled) at seed 777, temp 1.0.
+// Updated when: model retrained, SEP injected in generate(), or reference bundle changed.
 const GOLDEN = [
   ['HELLO',          'HEY THERE!'],
-  ['TELL ME A JOKE', 'WHY DID THE SCARECROW WIN AN AWARD? BECAUSE HE HEAR IT! WHATS THE SPECIFIC OR AND  IT WITH LEARN?'],
-  ['GOODBYE',        'TAKE CARE AND TALK TO YOU SOON!'],
-  ['HOW ARE YOU',    'HEY THERE! DOING GREAT.'],
+  ['TELL ME A JOKE', 'WHY DID THE BONE GO TO YOUR BRING? CAN HELP BUT WITH NEED TO SEE OWN JUST HEAD A PRONLIST HERE!'],
+  ['GOODBYE',        'HEY THERE!'],
+  ['HOW ARE YOU',    'IM AN AI HERE TO HELP A FEELING SENATING VIDE YOU HERE.'],
 ];
-// Note: goldens from wisp_ctx128.pt (ctx=128, 0.905 acc, SEP-trained)
+// Note: goldens from wisp_v2_fixed.pt (ctx=128, 2637 pairs, meta/jokes from distilled data)
 
 test('generate() reproduces the golden decoded outputs', async () => {
   for (const [prompt, expected] of GOLDEN) {
