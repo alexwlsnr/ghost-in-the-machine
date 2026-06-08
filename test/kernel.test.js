@@ -2,12 +2,7 @@
  * Wasm kernel characterization tests.
  *
  * Each op is checked against an independent JS (f64) reference implementation.
- * These lock the CURRENT float32 kernel behavior so the upcoming 4-bit / per-tensor
- * scale rework can't silently change op semantics.
- *
  * Run: node --test test/kernel.test.js
- * Builds the kernel first:
- *   (cd wasm && cargo build --target wasm32-unknown-unknown --release)
  */
 
 import { test, before } from 'node:test';
@@ -33,7 +28,6 @@ before(async () => {
   heap = (base + 15) & ~15;
 });
 
-// ── bump allocator over wasm linear memory ──────────────────────────
 function reset() { return heap; }
 function putF32(off, arr) {
   const view = new Float32Array(api.memory.buffer, off, arr.length);
@@ -44,7 +38,6 @@ function getF32(off, n) {
   return Array.from(new Float32Array(api.memory.buffer, off, n));
 }
 
-// Tolerance: wasm accumulates in f32, the reference in f64.
 function assertClose(actual, expected, msg, atol = 1e-4, rtol = 1e-4) {
   assert.equal(actual.length, expected.length, `${msg}: length`);
   for (let i = 0; i < actual.length; i++) {
@@ -56,9 +49,7 @@ function assertClose(actual, expected, msg, atol = 1e-4, rtol = 1e-4) {
   }
 }
 
-// ── deterministic pseudo-random inputs (no Math.random — reproducible) ──
 function seqVals(n, seed = 1) {
-  // simple LCG mapped to [-1, 1)
   const out = new Array(n);
   let s = seed >>> 0;
   for (let i = 0; i < n; i++) {
@@ -68,7 +59,6 @@ function seqVals(n, seed = 1) {
   return out;
 }
 
-// ── references ──────────────────────────────────────────────────────
 function refMatmul(w, b, inp, inDim, outDim) {
   const out = new Array(outDim);
   for (let o = 0; o < outDim; o++) {
@@ -102,7 +92,6 @@ function refCausal(data, s) {
   return out;
 }
 
-// ── tests ───────────────────────────────────────────────────────────
 test('matmul_f32w: out[o] = bias[o] + sum_i w[o,i]*inp[i]', () => {
   const inDim = 64, outDim = 48;
   const w = seqVals(inDim * outDim, 7);
@@ -128,7 +117,7 @@ test('matmul_f32w: zero input yields the bias', () => {
 });
 
 test('softmax_f32: normalizes to a probability distribution', () => {
-  const x = seqVals(40, 5).map((v) => v * 4); // widen the range
+  const x = seqVals(40, 5).map((v) => v * 4);
   const P = putF32(reset(), x);
   api.softmax_f32(P.ptr, x.length);
   const got = getF32(P.ptr, x.length);
@@ -139,7 +128,6 @@ test('softmax_f32: normalizes to a probability distribution', () => {
 test('softmax_causal_f32: masks the strict upper triangle to zero', () => {
   const s = 6;
   const scores = seqVals(s * s, 2).map((v) => v * 3);
-  // mirror caller convention: pre-set upper triangle to -inf
   for (let t = 0; t < s; t++) for (let j = t + 1; j < s; j++) scores[t * s + j] = -Infinity;
   const P = putF32(reset(), scores.map((v) => (v === -Infinity ? -3.4e38 : v)));
   api.softmax_causal_f32(P.ptr, s);
@@ -179,4 +167,172 @@ test('relu_f32: clamps negatives to zero, keeps positives', () => {
   const P = putF32(reset(), x);
   api.relu_f32(P.ptr, x.length);
   assertClose(getF32(P.ptr, x.length), x.map((v) => Math.max(0, v)), 'relu');
+});
+
+// -- Quantized kernel helpers -----------------------------------------------
+
+function pack4bit(weights, scale) {
+  const quant = weights.map((w) => Math.max(-8, Math.min(7, Math.round(w / scale))));
+  const bytes = new Uint8Array(Math.ceil(weights.length / 2));
+  for (let i = 0; i < weights.length; i += 2) {
+    const hi = (quant[i] + 8) & 0xF;
+    const lo = i + 1 < weights.length ? (quant[i + 1] + 8) & 0xF : 0;
+    bytes[i >> 1] = (hi << 4) | lo;
+  }
+  return bytes;
+}
+
+function refMatmul4bit(packed, scale, b, inp, inDim, outDim) {
+  const out = new Array(outDim);
+  for (let o = 0; o < outDim; o++) {
+    let sum = b[o];
+    for (let i = 0; i < inDim; i++) {
+      const flatIdx = o * inDim + i;
+      const byte = packed[flatIdx >> 1];
+      const nibble = flatIdx % 2 === 0 ? (byte >> 4) & 0xF : byte & 0xF;
+      sum += (nibble - 8) * scale * inp[i];
+    }
+    out[o] = sum;
+  }
+  return out;
+}
+
+function putU8(off, arr) {
+  const view = new Uint8Array(api.memory.buffer, off, arr.length);
+  view.set(arr);
+  return { ptr: off, next: (off + arr.length + 15) & ~15 };
+}
+
+function putI8(off, arr) {
+  const view = new Int8Array(api.memory.buffer, off, arr.length);
+  view.set(arr);
+  return { ptr: off, next: (off + arr.length + 15) & ~15 };
+}
+
+test('matmul_4bit: correctness vs JS reference (small matrix)', () => {
+  const inDim = 8, outDim = 6;
+  const weights = seqVals(inDim * outDim, 42).map((v) => v * 2);
+  const absmax = Math.max(...weights.map(Math.abs));
+  const scale = absmax / 7.0;
+  const packed = pack4bit(weights, scale);
+  const b = seqVals(outDim, 13);
+  const inp = seqVals(inDim, 21);
+  let p = reset();
+  const W = putU8(p, packed);
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, inp);
+  const O = putF32(I.next, new Array(outDim).fill(0));
+  api.matmul_4bit(W.ptr, scale, B.ptr, I.ptr, O.ptr, inDim, outDim);
+  const expected = refMatmul4bit(packed, scale, b, inp, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), expected, 'matmul_4bit', 1e-4, 1e-4);
+});
+
+test('matmul_4bit: zero input yields the bias', () => {
+  const inDim = 16, outDim = 8;
+  const weights = seqVals(inDim * outDim, 7).map((v) => v * 1.5);
+  const scale = Math.max(...weights.map(Math.abs)) / 7.0;
+  const packed = pack4bit(weights, scale);
+  const b = seqVals(outDim, 99);
+  let p = reset();
+  const W = putU8(p, packed);
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, new Array(inDim).fill(0));
+  const O = putF32(I.next, new Array(outDim).fill(123));
+  api.matmul_4bit(W.ptr, scale, B.ptr, I.ptr, O.ptr, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), b, 'matmul_4bit-bias');
+});
+
+test('matmul_4bit: scale proportionality -- doubling scale doubles output', () => {
+  const inDim = 4, outDim = 4;
+  const weights = [1.0, -1.0, 0.5, -0.5, 0.75, -0.75, 0.25, -0.25, 1.0, 0.5, -0.5, 0.0, 0.3, -0.3, 0.8, -0.8];
+  const scale1 = 1.0 / 7.0;
+  const scale2 = 2.0 / 7.0;
+  const packed = pack4bit(weights, scale1);
+  const b = new Array(outDim).fill(0);
+  const inp = [1.0, 1.0, 1.0, 1.0];
+  let p = reset();
+  const W = putU8(p, packed);
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, inp);
+  const O1 = putF32(I.next, new Array(outDim).fill(0));
+  const O2 = putF32(O1.next, new Array(outDim).fill(0));
+  api.matmul_4bit(W.ptr, scale1, B.ptr, I.ptr, O1.ptr, inDim, outDim);
+  api.matmul_4bit(W.ptr, scale2, B.ptr, I.ptr, O2.ptr, inDim, outDim);
+  const out1 = getF32(O1.ptr, outDim);
+  const out2 = getF32(O2.ptr, outDim);
+  for (let i = 0; i < outDim; i++) {
+    assert.ok(
+      Math.abs(out2[i] - 2 * out1[i]) < 1e-4,
+      `scale prop[${i}]: got ${out2[i]}, expected ${2 * out1[i]}`,
+    );
+  }
+});
+
+function refMatmul8bit(weights_i8, scale, b, inp, inDim, outDim) {
+  const out = new Array(outDim);
+  for (let o = 0; o < outDim; o++) {
+    let sum = b[o];
+    for (let i = 0; i < inDim; i++) {
+      sum += weights_i8[o * inDim + i] * scale * inp[i];
+    }
+    out[o] = sum;
+  }
+  return out;
+}
+
+test('matmul_8bit: correctness vs JS reference (small matrix)', () => {
+  const inDim = 8, outDim = 6;
+  const weights = seqVals(inDim * outDim, 42).map((v) => v * 3);
+  const absmax = Math.max(...weights.map(Math.abs));
+  const scale = absmax / 127.0;
+  const weights_i8 = weights.map((w) => Math.max(-127, Math.min(127, Math.round(w / scale))));
+  const b = seqVals(outDim, 13);
+  const inp = seqVals(inDim, 21);
+  let p = reset();
+  const W = putI8(p, weights_i8);
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, inp);
+  const O = putF32(I.next, new Array(outDim).fill(0));
+  api.matmul_8bit(W.ptr, scale, B.ptr, I.ptr, O.ptr, inDim, outDim);
+  const expected = refMatmul8bit(weights_i8, scale, b, inp, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), expected, 'matmul_8bit', 1e-4, 1e-4);
+});
+
+test('matmul_8bit: zero input yields the bias', () => {
+  const inDim = 16, outDim = 8;
+  const weights_i8 = seqVals(inDim * outDim, 7).map((v) => Math.round(v * 100));
+  const scale = 0.01;
+  const b = seqVals(outDim, 99);
+  let p = reset();
+  const W = putI8(p, weights_i8);
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, new Array(inDim).fill(0));
+  const O = putF32(I.next, new Array(outDim).fill(123));
+  api.matmul_8bit(W.ptr, scale, B.ptr, I.ptr, O.ptr, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), b, 'matmul_8bit-bias');
+});
+
+test('matmul_8bit: scale proportionality -- doubling scale doubles output', () => {
+  const inDim = 4, outDim = 4;
+  const weights_i8 = [10, -20, 30, -40, 50, -60, 70, -80, 5, 15, -5, -15, 100, -100, 50, -50];
+  const scale1 = 0.01;
+  const scale2 = 0.02;
+  const b = new Array(outDim).fill(0);
+  const inp = [1.0, 1.0, 1.0, 1.0];
+  let p = reset();
+  const W = putI8(p, weights_i8);
+  const B = putF32(W.next, b);
+  const I = putF32(B.next, inp);
+  const O1 = putF32(I.next, new Array(outDim).fill(0));
+  const O2 = putF32(O1.next, new Array(outDim).fill(0));
+  api.matmul_8bit(W.ptr, scale1, B.ptr, I.ptr, O1.ptr, inDim, outDim);
+  api.matmul_8bit(W.ptr, scale2, B.ptr, I.ptr, O2.ptr, inDim, outDim);
+  const out1 = getF32(O1.ptr, outDim);
+  const out2 = getF32(O2.ptr, outDim);
+  for (let i = 0; i < outDim; i++) {
+    assert.ok(
+      Math.abs(out2[i] - 2 * out1[i]) < 1e-4,
+      `scale prop[${i}]: got ${out2[i]}, expected ${2 * out1[i]}`,
+    );
+  }
 });
