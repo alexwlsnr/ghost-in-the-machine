@@ -81,6 +81,7 @@
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
+      "max_new": 80,
       "default": false,
       "available": true
     },
