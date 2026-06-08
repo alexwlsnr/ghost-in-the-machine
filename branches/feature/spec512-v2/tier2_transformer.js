@@ -51,21 +51,19 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     // function stack writes will corrupt the weights.
     const heapBase = (wasm.instance.exports.__heap_base?.value ?? 0);
     const base = (heapBase + 15) & ~15;
-    let maxOff = 0;
-    for (const s of Object.values(sec))
-        maxOff = Math.max(maxOff, s.offset + s.size);
-    // Headroom = the forward pass's scratch, sized from the arch (not a fixed 8 MB),
-    // so larger models (more layers, longer context) get enough memory. +1 page slack.
+    // Use the full binary size for memory allocation — this correctly handles
+    // formats like int4g where per-group scales are appended after the weight
+    // nibbles and would be missed if we only summed s.offset + s.size.
+    const binSize = binBuf.byteLength;
     const margin = forwardScratchBytes(manifest.architecture) + 65536;
-    const needPages = Math.ceil((base + maxOff + margin) / 65536);
+    const needPages = Math.ceil((base + binSize + margin) / 65536);
     const curPages = mem.buffer.byteLength / 65536;
     if (needPages > curPages)
         mem.grow(needPages - curPages);
+    // Copy the entire model binary in one shot so all scale arrays land correctly.
     const mem8 = new Uint8Array(mem.buffer);
     const bin8 = new Uint8Array(binBuf);
-    for (const s of Object.values(sec)) {
-        mem8.set(bin8.subarray(s.offset, s.offset + s.size), base + s.offset);
-    }
+    mem8.set(bin8, base);
     return { api, manifest: manifest.architecture, sec, base };
 }
 export function encode(text) {
@@ -92,6 +90,8 @@ function makeMatmulDispatch(api, sec, base) {
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int4')
             api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        else if (s.dtype === 'int4g')
+            api.matmul_4bit_grouped(wPtr, base + s.scales_offset, bPtr, inp, out, inD, outD, s.group_size ?? 32);
         else if (s.dtype === 'bfloat16')
             api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
         else

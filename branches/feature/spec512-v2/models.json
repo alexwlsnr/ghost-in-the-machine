@@ -102,6 +102,19 @@
       "available": true
     },
     {
+      "id": "spec512-4bit",
+      "name": "Spec512 4-bit",
+      "description": "27.6M params · 18MB · grouped quant · ctx 1024",
+      "bin": "model_spec512_4bit.bin",
+      "json": "model_spec512_4bit.json",
+      "size_mb": 18,
+      "params": "27.6M",
+      "ctx": 1024,
+      "max_new": 80,
+      "default": false,
+      "available": true
+    },
+    {
       "id": "spec512-v1.1",
       "name": "Spec512 v1.1",
       "description": "27.6M params · 27MB · retrained · ctx 1024",
