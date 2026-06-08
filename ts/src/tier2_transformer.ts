@@ -37,6 +37,18 @@ function forwardScratchBytes(arch: Arch): number {
        + al(d) + al(seq * seq) + al(seq * d) + al(v * 2);
 }
 
+/** Detect Wasm SIMD128 support at runtime (tiny probe Wasm module). */
+export async function detectSIMD(): Promise<boolean> {
+  // Minimal Wasm module that uses a SIMD instruction (f32x4.splat).
+  // If the browser/runtime supports SIMD128, WebAssembly.validate returns true.
+  try {
+    return WebAssembly.validate(new Uint8Array([
+      0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,
+      10,10,1,8,0,65,0,253,17,253,98,11
+    ]));
+  } catch { return false; }
+}
+
 export async function loadModel(urls: { wasm: string; bin: string; json: string }) {
   const [wasmBuf, binBuf, jsonBuf] = await Promise.all([
     fetchBuf(urls.wasm), fetchBuf(urls.bin), fetchBuf(urls.json),
@@ -141,8 +153,8 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
 
     // Attention: LN + QKV
     for (let p = 0; p < seq; p++) {
-      const lnBuf = f32(lOff, d);
-      for (let j = 0; j < d; j++) lnBuf[j] = emb[p * d + j];
+      // Copy emb[p] into lOff for layer norm — TypedArray.set is a native memcpy
+      f32(lOff, d).set(new Float32Array(mem.buffer, eOff + p * d * 4, d));
       api.layer_norm_f32(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`), d, 1e-5);
       const qp = qOff + p * d * 3 * 4;
       mw(`${pfx}_q_weight`, S(`${pfx}_q_bias`), lOff, qp, d, d);
@@ -159,21 +171,20 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
 
     // FFN
     for (let p = 0; p < seq; p++) {
-      const lnBuf = f32(lOff, d);
-      for (let j = 0; j < d; j++) lnBuf[j] = emb[p * d + j];
+      f32(lOff, d).set(new Float32Array(mem.buffer, eOff + p * d * 4, d));
       api.layer_norm_f32(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`), d, 1e-5);
       const up = tOff + p * arch.d_ff * 4;
       mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, up, d, arch.d_ff);
       api.relu_f32(up, arch.d_ff);
       mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), up, lOff, arch.d_ff, d);
-      for (let j = 0; j < d; j++) emb[p * d + j] += f32(lOff, d)[j];
+      // Residual add — use the existing Wasm export instead of a JS loop
+      api.add_vec_f32(eOff + p * d * 4, lOff, d);
     }
   }
 
-  // 3. Final LN + head (head weight stays fp32 in mixed-precision)
+  // 3. Final LN + head
   const lp = seq - 1;
-  const lnBuf = f32(lOff, d);
-  for (let j = 0; j < d; j++) lnBuf[j] = emb[lp * d + j];
+  f32(lOff, d).set(new Float32Array(mem.buffer, eOff + lp * d * 4, d));
   api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
 
   const zb = f32(oOff, arch.vocab_size);

@@ -398,6 +398,72 @@ test('matmul_bf16: zero input yields the bias', () => {
   assertClose(getF32(O.ptr, outDim), b, 'matmul_bf16-bias', 1e-6, 1e-6);
 });
 
+// ── SIMD matmul ──────────────────────────────────────────────────────────────
+// matmul_f32w_simd must produce bit-identical results to matmul_f32w.
+// Tests load the SIMD build directly; skipped if the file doesn't exist.
+
+const SIMD_PATH = join(ROOT, 'dist/tier2_kernel_simd.wasm');
+const HAS_SIMD_BUILD = existsSync(SIMD_PATH);
+
+let simdApi;
+let simdHeap;
+if (HAS_SIMD_BUILD) {
+  const simdBuf = readFileSync(SIMD_PATH);
+  const simdInst = await WebAssembly.instantiate(simdBuf);
+  simdApi = simdInst.instance.exports;
+  const simdBase = (simdApi.__heap_base?.value ?? 0x10000) >>> 0;
+  simdHeap = (simdBase + 15) & ~15;
+}
+
+function simdPutF32(off, arr) {
+  const view = new Float32Array(simdApi.memory.buffer, off, arr.length);
+  view.set(arr);
+  return { ptr: off, next: (off + arr.length * 4 + 15) & ~15 };
+}
+function simdGetF32(off, n) {
+  return Array.from(new Float32Array(simdApi.memory.buffer, off, n));
+}
+
+test('matmul_f32w_simd: matches scalar on large matrix (64×48)',
+  { skip: !HAS_SIMD_BUILD || typeof simdApi?.matmul_f32w_simd !== 'function' }, () => {
+  const inDim = 64, outDim = 48;
+  const w   = seqVals(inDim * outDim, 7);
+  const b   = seqVals(outDim, 13);
+  const inp = seqVals(inDim, 21);
+
+  let p = simdHeap;
+  const W = simdPutF32(p, w); const B = simdPutF32(W.next, b);
+  const I = simdPutF32(B.next, inp);
+  const O_scalar = simdPutF32(I.next, new Array(outDim).fill(0));
+  const O_simd   = simdPutF32(O_scalar.next, new Array(outDim).fill(0));
+
+  simdApi.matmul_f32w(W.ptr, B.ptr, I.ptr, O_scalar.ptr, inDim, outDim);
+  simdApi.matmul_f32w_simd(W.ptr, B.ptr, I.ptr, O_simd.ptr, inDim, outDim);
+
+  assertClose(simdGetF32(O_simd.ptr, outDim), simdGetF32(O_scalar.ptr, outDim),
+    'simd matches scalar', 1e-5, 1e-5);
+});
+
+test('matmul_f32w_simd: non-multiple-of-4 input dimension (37×16)',
+  { skip: !HAS_SIMD_BUILD || typeof simdApi?.matmul_f32w_simd !== 'function' }, () => {
+  const inDim = 37, outDim = 16;  // 37 % 4 != 0 — tests tail handling
+  const w   = seqVals(inDim * outDim, 3);
+  const b   = seqVals(outDim, 99);
+  const inp = seqVals(inDim, 55);
+
+  let p = simdHeap;
+  const W = simdPutF32(p, w); const B = simdPutF32(W.next, b);
+  const I = simdPutF32(B.next, inp);
+  const O_scalar = simdPutF32(I.next, new Array(outDim).fill(0));
+  const O_simd   = simdPutF32(O_scalar.next, new Array(outDim).fill(0));
+
+  simdApi.matmul_f32w(W.ptr, B.ptr, I.ptr, O_scalar.ptr, inDim, outDim);
+  simdApi.matmul_f32w_simd(W.ptr, B.ptr, I.ptr, O_simd.ptr, inDim, outDim);
+
+  assertClose(simdGetF32(O_simd.ptr, outDim), simdGetF32(O_scalar.ptr, outDim),
+    'simd tail handling', 1e-5, 1e-5);
+});
+
 // ── Attention kernel ──────────────────────────────────────────────────────────
 
 /**

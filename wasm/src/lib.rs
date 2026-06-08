@@ -334,3 +334,63 @@ pub unsafe extern "C" fn attention_f32(
         }
     }
 }
+
+// --- SIMD128 matmul ---
+//
+// matmul_f32w_simd: same semantics as matmul_f32w, implemented with Wasm SIMD128.
+// Processes 4 floats per instruction (f32x4). For dimensions not divisible by 4,
+// a scalar tail loop handles the remainder.
+//
+// Requires the Wasm SIMD128 feature at build time:
+//   RUSTFLAGS='-C target-feature=+simd128' cargo build ...
+//
+// The export name is different from matmul_f32w so both can coexist in the same
+// binary: JS detects the SIMD export and uses it when present, falling back to
+// the scalar path for older browsers.
+#[cfg(target_feature = "simd128")]
+#[no_mangle]
+pub unsafe extern "C" fn matmul_f32w_simd(
+    weights: *const f32,
+    biases:  *const f32,
+    input:   *const f32,
+    output:  *mut f32,
+    in_dim:  i32,
+    out_dim: i32,
+) {
+    use core::arch::wasm32::*;
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let w   = core::slice::from_raw_parts(weights, out_dim * in_dim);
+    let b   = core::slice::from_raw_parts(biases, out_dim);
+    let inp = core::slice::from_raw_parts(input, in_dim);
+    let out = core::slice::from_raw_parts_mut(output, out_dim);
+
+    let chunks = in_dim / 4;
+    let tail   = in_dim % 4;
+
+    for o in 0..out_dim {
+        let w_row = &w[o * in_dim..];
+        let mut acc = f32x4_splat(0.0_f32);
+
+        for i in 0..chunks {
+            let wv = v128_load(w_row.as_ptr().add(i * 4) as *const v128);
+            let iv = v128_load(inp.as_ptr().add(i * 4) as *const v128);
+            acc = f32x4_add(acc, f32x4_mul(wv, iv));
+        }
+
+        // Horizontal sum of the four SIMD lanes
+        let mut sum = b[o]
+            + f32x4_extract_lane::<0>(acc)
+            + f32x4_extract_lane::<1>(acc)
+            + f32x4_extract_lane::<2>(acc)
+            + f32x4_extract_lane::<3>(acc);
+
+        // Scalar tail for the remaining 0-3 elements
+        let base = chunks * 4;
+        for i in 0..tail {
+            sum += w_row[base + i] * inp[base + i];
+        }
+
+        out[o] = sum;
+    }
+}
