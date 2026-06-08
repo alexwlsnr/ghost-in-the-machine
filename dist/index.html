@@ -618,6 +618,8 @@ input.addEventListener('keydown', async (e) => {
   let response = '';
   const startTime = performance.now();
   let tokenCount = 0;
+  const m = activeModel();
+  console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| cache:', !!kvCaches[activeId]);
 
   try {
     for await (const step of generate(activeModel(), query, 160, temperature, Math.random, kvCaches[activeId])) {
@@ -643,6 +645,7 @@ input.addEventListener('keydown', async (e) => {
     }
   } catch(e) {
     thinkEl.remove();
+    console.error('[generate] error:', e);
     appendLine(`ERROR: ${e.message}`, 'error');
   }
 
