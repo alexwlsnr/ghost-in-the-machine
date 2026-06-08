@@ -333,7 +333,7 @@
 // Code files (tiny) — always fresh to avoid stale-cache bugs.
 // Model weights — versioned so they cache between reloads.
 const _t = Date.now();
-const { loadModel, encode, generate } = await import('./tier2_transformer.js?t=' + _t);
+const { loadModel, encode, generate, createCache } = await import('./tier2_transformer.js?t=' + _t);
 
 const terminal    = document.getElementById('terminal');
 const input       = document.getElementById('query-input');
@@ -354,6 +354,7 @@ const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
 // activeId: currently active model id
 let registry   = [];
 let modelCache = {};
+let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
 let activeId   = null;
 let isSwitching = false;
 
@@ -484,6 +485,7 @@ async function switchModel(id) {
     });
 
     modelCache[id] = loaded;
+    kvCaches[id]   = createCache(loaded);
     reg._loading = false;
     activeId = id;
 
@@ -567,6 +569,7 @@ async function boot() {
     });
 
     modelCache[defaultModel.id] = loaded;
+    kvCaches[defaultModel.id]   = createCache(loaded);
     defaultModel._loading = false;
     activeId = defaultModel.id;
 
@@ -617,7 +620,7 @@ input.addEventListener('keydown', async (e) => {
   let tokenCount = 0;
 
   try {
-    for await (const step of generate(activeModel(), query, 160, temperature)) {
+    for await (const step of generate(activeModel(), query, 160, temperature, Math.random, kvCaches[activeId])) {
       if (step.done) break;
 
       // Replace thinking indicator with response on first token

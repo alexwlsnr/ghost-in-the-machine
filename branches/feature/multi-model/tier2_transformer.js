@@ -286,84 +286,78 @@ function prefill(api, sec, arch, tokens, base, cache) {
     }
     return logits;
 }
-export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache) {
+/**
+ * Sample a token index from logits with temperature + optional top-k / top-p.
+ * topK=0 / topP=1.0 → pure temperature (default, backward-compatible).
+ * Recommended for Shade/Specter: topK=40, topP=0.9.
+ */
+export function sampleFromLogits(logits, temp, topK, topP, rand) {
+    const n = logits.length;
+    const pairs = Array.from({ length: n }, (_, i) => [i, logits[i]]);
+    pairs.sort((a, b) => b[1] - a[1]);
+    const k = topK > 0 ? Math.min(topK, n) : n;
+    const candidates = pairs.slice(0, k);
+    const maxL = candidates[0][1];
+    let sum = 0;
+    const weighted = candidates.map(([idx, l]) => {
+        const p = Math.exp((l - maxL) / temp);
+        sum += p;
+        return [idx, p];
+    });
+    if (topP < 1.0) {
+        let cumul = 0, cutoff = weighted.length;
+        for (let i = 0; i < weighted.length; i++) {
+            cumul += weighted[i][1] / sum;
+            if (cumul >= topP) {
+                cutoff = i + 1;
+                break;
+            }
+        }
+        weighted.splice(cutoff);
+        sum = weighted.reduce((s, [, p]) => s + p, 0);
+    }
+    let r = rand() * sum;
+    for (const [idx, p] of weighted) {
+        r -= p;
+        if (r <= 0)
+            return idx;
+    }
+    return weighted[weighted.length - 1][0];
+}
+export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0) {
     const { api, manifest: arch, sec, base } = model;
-    const win = arch.max_len - 1; // hard context limit of the model
+    const win = arch.max_len - 1;
     const tokens = encode(prompt.toUpperCase()).slice(0, win);
     // -- Cached path ----------------------------------------------------
     if (cache !== undefined) {
         cache.length = 0;
-        // Prefill: run incremental forward over all prompt tokens, populating the cache.
         let logits = prefill(api, sec, arch, tokens, base, cache);
-        const sample = (lg) => {
-            let maxV = -Infinity;
-            for (let i = 0; i < arch.vocab_size; i++)
-                if (lg[i] > maxV)
-                    maxV = lg[i];
-            let sum = 0;
-            const probs = new Float64Array(arch.vocab_size);
-            for (let i = 0; i < arch.vocab_size; i++) {
-                probs[i] = Math.exp((lg[i] - maxV) / temp);
-                sum += probs[i];
-            }
-            let r = rand() * sum, next = 0;
-            for (let i = 0; i < arch.vocab_size; i++) {
-                r -= probs[i];
-                if (r <= 0) {
-                    next = i;
-                    break;
-                }
-            }
-            return next;
-        };
         for (let s = 0; s < maxNew; s++) {
             if (cache.length >= win) {
                 yield { char: '', token: PAD, done: true };
                 return;
             }
             await new Promise((r) => setTimeout(r, 0));
-            const next = sample(logits);
+            const next = sampleFromLogits(logits, temp, topK, topP, rand);
             if (next === EOS || next === PAD) {
                 yield { char: '', token: next, done: true };
                 return;
             }
             yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
-            // Advance: run incremental forward for the new token at the next position.
             logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
         }
         yield { char: '', token: PAD, done: true };
         return;
     }
-    // -- Full-recompute path (no cache -- backward compatible) ----------
+    // -- Full-recompute path (no cache — backward compatible) -----------
     for (let s = 0; s < maxNew; s++) {
-        // Model can only attend to `win` tokens; beyond that it produces garbage,
-        // so stop cleanly rather than sliding the window.
         if (tokens.length >= win) {
             yield { char: '', token: PAD, done: true };
             return;
         }
-        // Yield to the browser so it can paint: makes the prompt + thinking
-        // indicator appear immediately, and streams each token as it arrives.
         await new Promise((r) => setTimeout(r, 0));
         const logits = forward(api, sec, arch, tokens, base);
-        let maxV = -Infinity;
-        for (let i = 0; i < arch.vocab_size; i++)
-            if (logits[i] > maxV)
-                maxV = logits[i];
-        let sum = 0;
-        const probs = new Float64Array(arch.vocab_size);
-        for (let i = 0; i < arch.vocab_size; i++) {
-            probs[i] = Math.exp((logits[i] - maxV) / temp);
-            sum += probs[i];
-        }
-        let r = rand() * sum, next = 0;
-        for (let i = 0; i < arch.vocab_size; i++) {
-            r -= probs[i];
-            if (r <= 0) {
-                next = i;
-                break;
-            }
-        }
+        const next = sampleFromLogits(logits, temp, topK, topP, rand);
         if (next === EOS || next === PAD) {
             yield { char: '', token: next, done: true };
             return;
