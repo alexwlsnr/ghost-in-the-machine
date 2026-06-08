@@ -265,6 +265,50 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False, truncate:
     return inputs, targets
 
 
+def parse_multiturn_line(line: str) -> Optional[List[Tuple[str, str]]]:
+    """Parse a multi-turn data line into a list of (query, response) pairs.
+
+    Format: Q1|R1|Q2|R2|...  (even number of pipe-separated fields).
+    Single-turn Q|R is also valid (returns a one-element list).
+    Odd trailing fields are dropped. Returns None for unparseable lines.
+    """
+    if not line or '|' not in line:
+        return None
+    parts = line.strip().split('|')
+    if len(parts) % 2 != 0:
+        parts = parts[:-1]
+    if len(parts) < 2:
+        return None
+    return [(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)]
+
+
+def make_sequence_multiturn(
+    turns: List[Tuple[str, str]],
+    max_len: int = DEFAULT_MAX_LEN,
+) -> Tuple[List[int], List[int]]:
+    """Build an autoregressive sequence from a list of (query, response) pairs.
+
+    Layout: [Q1][SEP][R1][SEP][Q2][SEP][R2][EOS]
+
+    Returns ([], []) when the sequence exceeds max_len.
+    For a single turn this produces an identical result to make_sequence().
+    """
+    tokens: List[int] = []
+    for q, r in turns:
+        tokens += encode(q) + [SEP_TOKEN] + encode(r) + [SEP_TOKEN]
+    # Replace trailing SEP with EOS
+    if not tokens:
+        return [], []
+    tokens[-1] = EOS_TOKEN
+
+    if len(tokens) > max_len:
+        return [], []
+
+    inp = tokens
+    tgt = tokens[1:] + [PAD_TOKEN]   # shift-left; last slot predicts PAD (ignored in loss)
+    return inp, tgt
+
+
 def make_batches(items, batch_size: int):
     """Split a sequence into consecutive batches of at most batch_size."""
     if batch_size < 1:
