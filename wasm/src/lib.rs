@@ -235,3 +235,73 @@ pub unsafe extern "C" fn matmul_f32w(
         out[o] = sum;
     }
 }
+
+/// Multi-head causal self-attention (float32).
+///
+/// qkv:      [seq, d*3]  — Q | K | V interleaved per position
+///           qkv[p*d*3 + 0..d]    = Q[p]
+///           qkv[p*d*3 + d..2d]   = K[p]
+///           qkv[p*d*3 + 2d..3d]  = V[p]
+/// scores:   [seq, seq] scratch buffer (overwritten)
+/// attn_out: [seq, d]   output
+#[no_mangle]
+pub unsafe extern "C" fn attention_f32(
+    qkv:      *const f32,
+    scores:   *mut f32,
+    attn_out: *mut f32,
+    seq:      i32,
+    d:        i32,
+    n_heads:  i32,
+) {
+    let seq = seq as usize;
+    let d   = d   as usize;
+    let nh  = n_heads as usize;
+    let dh  = d / nh;
+    let inv_sqrt_dh = 1.0_f32 / (dh as f32).sqrt();
+
+    let qkv_s  = core::slice::from_raw_parts(qkv, seq * d * 3);
+    let sc     = core::slice::from_raw_parts_mut(scores, seq * seq);
+    let out    = core::slice::from_raw_parts_mut(attn_out, seq * d);
+
+    // Zero output buffer — heads accumulate into it.
+    for v in out.iter_mut() { *v = 0.0; }
+
+    for h in 0..nh {
+        let ho = h * dh; // head offset within d
+
+        // 1. Q·Kᵀ with causal mask → scores[seq, seq]
+        for qi in 0..seq {
+            for kj in 0..=qi {
+                let mut dot = 0.0_f32;
+                for x in 0..dh {
+                    dot += qkv_s[qi * d * 3 + ho + x]
+                         * qkv_s[kj * d * 3 + d + ho + x];
+                }
+                sc[qi * seq + kj] = dot * inv_sqrt_dh;
+            }
+            for kj in (qi + 1)..seq { sc[qi * seq + kj] = f32::NEG_INFINITY; }
+        }
+
+        // 2. Softmax per row (causal — upper triangle already -inf)
+        for qi in 0..seq {
+            let row = qi * seq;
+            let mut max_val = f32::NEG_INFINITY;
+            for kj in 0..=qi { if sc[row + kj] > max_val { max_val = sc[row + kj]; } }
+            let mut sum = 0.0_f32;
+            for kj in 0..=qi { sc[row + kj] = (sc[row + kj] - max_val).exp(); sum += sc[row + kj]; }
+            if sum > 0.0 { for kj in 0..=qi { sc[row + kj] /= sum; } }
+            for kj in (qi + 1)..seq { sc[row + kj] = 0.0; }
+        }
+
+        // 3. Weighted V sum → attn_out[seq, d]
+        for qi in 0..seq {
+            for x in 0..dh {
+                let mut val = 0.0_f32;
+                for kj in 0..=qi {
+                    val += sc[qi * seq + kj] * qkv_s[kj * d * 3 + d * 2 + ho + x];
+                }
+                out[qi * d + ho + x] = val;
+            }
+        }
+    }
+}

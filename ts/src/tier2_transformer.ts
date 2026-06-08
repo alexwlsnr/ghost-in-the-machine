@@ -13,6 +13,7 @@ interface WasmApi {
   layer_norm_f32(x: number, g: number, b: number, d: number, e: number): void;
   add_vec_f32(a: number, b: number, n: number): void;
   relu_f32(p: number, n: number): void;
+  attention_f32(qkv: number, scores: number, attn: number, seq: number, d: number, nHeads: number): void;
 }
 
 const PAD = 256;
@@ -130,30 +131,7 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
       api.matmul_f32w(S(`${pfx}_v_weight`), S(`${pfx}_v_bias`), lOff, qp + d * 8, d, d);
     }
 
-    const qkv = f32(qOff, seq * d * 3);
-    const attn = f32(aOff, seq * d);
-    const scores = f32(sOff, seq * seq);
-    attn.fill(0);
-
-    for (let h = 0; h < nh; h++) {
-      const ho = h * dh;
-      for (let qi = 0; qi < seq; qi++) {
-        for (let kj = 0; kj <= qi; kj++) {
-          let dot = 0;
-          for (let x = 0; x < dh; x++) dot += qkv[qi * d * 3 + ho + x] * qkv[kj * d * 3 + d + ho + x];
-          scores[qi * seq + kj] = dot / Math.sqrt(dh);
-        }
-        for (let kj = qi + 1; kj < seq; kj++) scores[qi * seq + kj] = -Infinity;
-      }
-      api.softmax_causal_f32(sOff, seq);
-      for (let qi = 0; qi < seq; qi++) {
-        for (let x = 0; x < dh; x++) {
-          let val = 0;
-          for (let kj = 0; kj < seq; kj++) val += scores[qi * seq + kj] * qkv[kj * d * 3 + d * 2 + ho + x];
-          attn[qi * d + ho + x] = val;
-        }
-      }
-    }
+    api.attention_f32(qOff, sOff, aOff, seq, d, nh);
 
     for (let p = 0; p < seq; p++) {
       api.matmul_f32w(S(`${pfx}_o_weight`), S(`${pfx}_o_bias`), aOff + p * d * 4, tOff + p * d * 4, d, d);

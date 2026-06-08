@@ -317,6 +317,7 @@ test('matmul_8bit: scale proportionality -- doubling scale doubles output', () =
   const weights_i8 = [10, -20, 30, -40, 50, -60, 70, -80, 5, 15, -5, -15, 100, -100, 50, -50];
   const scale1 = 0.01;
   const scale2 = 0.02;
+  // ^^^ keep above
   const b = new Array(outDim).fill(0);
   const inp = [1.0, 1.0, 1.0, 1.0];
   let p = reset();
@@ -335,4 +336,87 @@ test('matmul_8bit: scale proportionality -- doubling scale doubles output', () =
       `scale prop[${i}]: got ${out2[i]}, expected ${2 * out1[i]}`,
     );
   }
+});
+
+// ── Attention kernel ──────────────────────────────────────────────────────────
+
+/**
+ * JS reference: multi-head causal self-attention.
+ * Same logic as forward() in tier2_transformer.ts — known correct via parity tests.
+ * qkv: Float32Array [seq, d*3]  (Q | K | V interleaved per position)
+ * returns Float32Array [seq, d]
+ */
+function refAttention(qkv, seq, d, n_heads) {
+  const dh = d / n_heads;
+  const attn = new Float32Array(seq * d);
+  const scores = new Float32Array(seq * seq);
+  for (let h = 0; h < n_heads; h++) {
+    const ho = h * dh;
+    for (let qi = 0; qi < seq; qi++) {
+      for (let kj = 0; kj <= qi; kj++) {
+        let dot = 0;
+        for (let x = 0; x < dh; x++)
+          dot += qkv[qi * d * 3 + ho + x] * qkv[kj * d * 3 + d + ho + x];
+        scores[qi * seq + kj] = dot / Math.sqrt(dh);
+      }
+      for (let kj = qi + 1; kj < seq; kj++) scores[qi * seq + kj] = -Infinity;
+    }
+    for (let qi = 0; qi < seq; qi++) {
+      let maxV = -Infinity;
+      for (let kj = 0; kj <= qi; kj++) maxV = Math.max(maxV, scores[qi * seq + kj]);
+      let sum = 0;
+      for (let kj = 0; kj <= qi; kj++) {
+        scores[qi * seq + kj] = Math.exp(scores[qi * seq + kj] - maxV);
+        sum += scores[qi * seq + kj];
+      }
+      for (let kj = 0; kj <= qi; kj++) scores[qi * seq + kj] /= sum;
+      for (let kj = qi + 1; kj < seq; kj++) scores[qi * seq + kj] = 0;
+    }
+    for (let qi = 0; qi < seq; qi++) {
+      for (let x = 0; x < dh; x++) {
+        let val = 0;
+        for (let kj = 0; kj <= qi; kj++)
+          val += scores[qi * seq + kj] * qkv[kj * d * 3 + d * 2 + ho + x];
+        attn[qi * d + ho + x] = val;
+      }
+    }
+  }
+  return attn;
+}
+
+test('attention_f32: output matches JS reference (2 heads, seq=4, d=8)', () => {
+  const seq = 4, d = 8, n_heads = 2;
+  const qkv = new Float32Array(seqVals(seq * d * 3, 77).map(v => v * 0.5));
+  const expected = refAttention(qkv, seq, d, n_heads);
+  let p = reset();
+  const QKV    = putF32(p, qkv);
+  const SCORES = putF32(QKV.next, new Float32Array(seq * seq));
+  const ATTN   = putF32(SCORES.next, new Float32Array(seq * d));
+  api.attention_f32(QKV.ptr, SCORES.ptr, ATTN.ptr, seq, d, n_heads);
+  assertClose(getF32(ATTN.ptr, seq * d), Array.from(expected), 'attention_f32 basic');
+});
+
+test('attention_f32: position 0 attends only to itself (causal mask)', () => {
+  const seq = 4, d = 4, n_heads = 1;
+  const qkv = new Float32Array(seq * d * 3).fill(0);
+  for (let j = 0; j < d; j++) qkv[0 * d * 3 + d * 2 + j] = (j + 1) * 0.1;
+  const expected = refAttention(qkv, seq, d, n_heads);
+  let p = reset();
+  const QKV    = putF32(p, qkv);
+  const SCORES = putF32(QKV.next, new Float32Array(seq * seq));
+  const ATTN   = putF32(SCORES.next, new Float32Array(seq * d));
+  api.attention_f32(QKV.ptr, SCORES.ptr, ATTN.ptr, seq, d, n_heads);
+  assertClose(getF32(ATTN.ptr, seq * d), Array.from(expected), 'attention_f32 causal');
+});
+
+test('attention_f32: matches JS reference (4 heads, seq=8, d=16)', () => {
+  const seq = 8, d = 16, n_heads = 4;
+  const qkv = new Float32Array(seqVals(seq * d * 3, 42));
+  const expected = refAttention(qkv, seq, d, n_heads);
+  let p = reset();
+  const QKV    = putF32(p, qkv);
+  const SCORES = putF32(QKV.next, new Float32Array(seq * seq));
+  const ATTN   = putF32(SCORES.next, new Float32Array(seq * d));
+  api.attention_f32(QKV.ptr, SCORES.ptr, ATTN.ptr, seq, d, n_heads);
+  assertClose(getF32(ATTN.ptr, seq * d), Array.from(expected), 'attention_f32 larger');
 });
