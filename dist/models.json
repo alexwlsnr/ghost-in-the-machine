@@ -96,6 +96,19 @@
       "ctx": 1024,
       "default": false,
       "available": true
+    },
+    {
+      "id": "spec512-v1.1",
+      "name": "Spec512 v1.1",
+      "description": "27.6M params \u00b7 27MB \u00b7 retrained \u00b7 ctx 1024",
+      "bin": "model_spec512_v1.1_8bit.bin",
+      "json": "model_spec512_v1.1_8bit.json",
+      "size_mb": 27,
+      "params": "27.6M",
+      "ctx": 1024,
+      "max_new": 80,
+      "default": false,
+      "available": false
     }
   ]
 }
