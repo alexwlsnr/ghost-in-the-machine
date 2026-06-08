@@ -3,7 +3,7 @@
     {
       "id": "wisp-8bit",
       "name": "Wisp",
-      "description": "3.3M params · 3.6MB · instant load",
+      "description": "3.3M params \u00b7 3.6MB \u00b7 instant load",
       "bin": "model_wisp_8bit.bin",
       "json": "model_wisp_8bit.json",
       "size_mb": 3.6,
@@ -15,7 +15,7 @@
     {
       "id": "wisp-fp32",
       "name": "Wisp fp32",
-      "description": "3.3M params · 13MB · reference",
+      "description": "3.3M params \u00b7 13MB \u00b7 reference",
       "bin": "model_wisp_fp32.bin",
       "json": "model_wisp_fp32.json",
       "size_mb": 13,
@@ -27,55 +27,55 @@
     {
       "id": "shade-fp32",
       "name": "Shade fp32",
-      "description": "10.9M params · 42MB · reference",
+      "description": "10.9M params \u00b7 42MB \u00b7 reference",
       "bin": "model_shade_fp32.bin",
       "json": "model_shade_fp32.json",
       "size_mb": 42,
       "params": "10.9M",
       "ctx": 128,
       "default": false,
-      "available": false
+      "available": true
     },
     {
       "id": "shade-bf16",
       "name": "Shade bf16",
-      "description": "10.9M params · 22MB · near-lossless",
+      "description": "10.9M params \u00b7 22MB \u00b7 near-lossless",
       "bin": "model_shade_bf16.bin",
       "json": "model_shade_bf16.json",
       "size_mb": 22,
       "params": "10.9M",
       "ctx": 128,
       "default": false,
-      "available": false
+      "available": true
     },
     {
       "id": "shade-8bit",
       "name": "Shade 8-bit",
-      "description": "10.9M params · 11MB · click to load",
+      "description": "10.9M params \u00b7 11MB \u00b7 click to load",
       "bin": "model_shade_8bit.bin",
       "json": "model_shade_8bit.json",
       "size_mb": 11,
       "params": "10.9M",
       "ctx": 128,
       "default": false,
-      "available": false
+      "available": true
     },
     {
       "id": "shade-4bit",
       "name": "Shade 4-bit",
-      "description": "10.9M params · 6MB · experimental",
+      "description": "10.9M params \u00b7 6MB \u00b7 experimental",
       "bin": "model_shade_4bit.bin",
       "json": "model_shade_4bit.json",
       "size_mb": 6,
       "params": "10.9M",
       "ctx": 128,
       "default": false,
-      "available": false
+      "available": true
     },
     {
       "id": "spec512",
       "name": "Spec512",
-      "description": "25.6M params · 14MB · coming soon",
+      "description": "25.6M params \u00b7 14MB \u00b7 coming soon",
       "bin": "model_spec512.bin",
       "json": "model_spec512.json",
       "size_mb": 14,
