@@ -117,7 +117,7 @@ def ingest(
     if verbose:
         print(f"Loading allenai/soda ({split} split) — streaming…")
 
-    ds = load_dataset("allenai/soda", split=split, streaming=True, trust_remote_code=True)
+    ds = load_dataset("allenai/soda", split=split, streaming=True)
 
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
 
