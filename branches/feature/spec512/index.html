@@ -433,7 +433,7 @@ let registry   = [];
 let modelCache = {};
 let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
 let histories  = {};   // id → Turn[] — conversation history per model
-let memoryOn   = false; // when true, history injected for ALL models (experimental on ctx=128)
+let memoryOn   = true;  // history injection — on by default (Spec512 needs it; experimental on ctx=128)
 let activeId   = null;
 let isSwitching = false;
 
@@ -751,9 +751,8 @@ input.addEventListener('keydown', async (e) => {
   let tokenCount = 0;
   const m = activeModel();
   const reg = registry.find(r => r.id === activeId);
-  // Pass history for ctx≥256 models always; for smaller ctx only when memory mode is on
-  const useHistory = reg && (reg.ctx >= 256 || memoryOn);
-  const history = useHistory ? (histories[activeId] || []) : undefined;
+  // MEM toggle controls history injection for all models
+  const history = memoryOn ? (histories[activeId] || []) : undefined;
   console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
 
   try {
@@ -828,7 +827,7 @@ function updateMemBadge() {
   memBadge.style.borderColor = memoryOn ? '#33ff3388' : '#33ff3322';
   memBadge.style.background  = memoryOn ? '#33ff3311' : 'transparent';
   memBadge.title             = memoryOn
-    ? 'Memory ON — click to disable'
+    ? 'Memory ON — click to disable (all models)'
     : 'Memory OFF — click to enable (experimental on Wisp/Shade)';
 }
 memBadge.addEventListener('click', () => {
@@ -838,11 +837,8 @@ memBadge.addEventListener('click', () => {
     appendLine('MEMORY: ON — previous exchanges injected as context (experimental)', 'boot');
   } else {
     appendLine('MEMORY: OFF', 'boot');
-    // Clear histories for small-ctx models since they won't use them anyway
-    for (const id of Object.keys(histories)) {
-      const reg = registry.find(r => r.id === id);
-      if (reg && reg.ctx < 256) histories[id] = [];
-    }
+    // Clear all histories when turning memory off
+    histories = {};
   }
   input.focus();
 });
