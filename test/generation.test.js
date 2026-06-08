@@ -71,6 +71,7 @@ const GOLDEN = [
   ['GOODBYE',        'TAKE CARE AND TALK TO YOU SOON!'],
   ['HOW ARE YOU',    'HEY THERE! DOING GREAT.'],
 ];
+// Note: goldens from wisp_ctx128.pt (ctx=128, 0.905 acc, SEP-trained)
 
 test('generate() reproduces the golden decoded outputs', async () => {
   for (const [prompt, expected] of GOLDEN) {
