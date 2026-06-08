@@ -22,6 +22,10 @@ from typing import List, Optional, Tuple
 VOCAB_SIZE = 258  # bytes 0-255 + PAD_TOKEN (256) + EOS_TOKEN (257)
 PAD_TOKEN = 256
 EOS_TOKEN = 257
+SEP_TOKEN = 1    # ASCII SOH — query/response separator. Injected between Q and R
+                 # in training so the model learns a clean response zone.
+                 # At inference, injected after the prompt so generate() outputs
+                 # pure response bytes (never the separator itself).
 DEFAULT_MAX_LEN = 64
 
 
@@ -193,17 +197,21 @@ def decode(tokens: List[int]) -> str:
 def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN) -> Tuple[List[int], List[int]]:
     """Create input/target pair for autoregressive training.
 
-    input:  [Q  bytes...] [R bytes...] [PAD...]
-    target: [Q bytes...] [R bytes...] [PAD...]  (shifted left by 1 in training)
+    Layout: [Q bytes] [SEP] [R bytes] [EOS]
+
+    SEP (byte 1) separates query from response so the model learns a clean
+    response zone. Pairs that would need truncation are signalled by returning
+    an input shorter than 4 bytes — _build_sequences drops them so EOS always
+    lands at a natural sentence end, never mid-truncation.
     """
     q_bytes = encode(query)
     r_bytes = encode(response)
 
-    full = q_bytes + r_bytes
-    if len(full) >= max_len:
-        full = full[:max_len - 1]
+    full = q_bytes + [SEP_TOKEN] + r_bytes
+    if len(full) + 1 > max_len:  # +1 for EOS — would need to truncate, signal caller
+        return [], []
 
-    # Input: full sequence + EOS (model sees this)
+    # Input: Q + SEP + R + EOS
     inp = full + [EOS_TOKEN]
 
     # Target: predict next token (shifted left), EOS marks end, PAD fills remainder
@@ -240,6 +248,8 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False):
         q_norm = q.strip() if preserve_case else q.upper().strip()
         r_norm = r.strip() if preserve_case else r.upper().strip()
         inp, tgt = make_sequence(q_norm, r_norm, max_len)
+        # make_sequence returns [] when the pair needs truncation (Fix B).
+        # Only include pairs that fit fully — EOS always at a sentence end.
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -493,7 +503,9 @@ def generate(
     # Cap the prompt at the context window (mirrors the TS orchestrator). The old
     # `[:max_len - max_new]` silently dropped prompt bytes (e.g. "HELLO" → "HELL").
     prompt_norm = prompt if preserve_case else prompt.upper()
-    tokens = encode(prompt_norm)[:model.max_len - 1]
+    # Inject SEP after the prompt — this puts the model in "response zone"
+    # so it generates R directly rather than potentially emitting SEP first.
+    tokens = encode(prompt_norm)[:model.max_len - 2] + [SEP_TOKEN]
     prompt_len = len(tokens)
 
     for _ in range(max_new):
@@ -505,11 +517,16 @@ def generate(
 
         if next_token == EOS_TOKEN or next_token == PAD_TOKEN:
             break
-        tokens.append(next_token)
+        # Skip any SEP token the model emits (shouldn't happen with injected SEP,
+        # but guard against it so it never appears in output.)
+        if next_token != SEP_TOKEN:
+            tokens.append(next_token)
         if len(tokens) >= model.max_len:
             break
 
     # Return only the generated portion (after the prompt tokens we kept).
+    # decode() already filters SEP (byte 1) since it only outputs b < 256 that
+    # are printable; SEP_TOKEN=1 is a control char that bytes().decode replaces.
     return decode(tokens[prompt_len:])
 
 

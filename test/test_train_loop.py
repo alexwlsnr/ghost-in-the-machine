@@ -108,12 +108,14 @@ class TrainLoopKnobs(unittest.TestCase):
             self.assertEqual(n["v"], expected_calls, f"qat_every={qat_every}")
 
     def test_runs_with_custom_batch_size_and_saves_checkpoint(self):
+        torch.manual_seed(42)  # fixed seed: ensures acc > 0 so checkpoint is saved
+        np.random.seed(42)
         model = _tiny_model()
         with tempfile.TemporaryDirectory() as d:
             ckpt = os.path.join(d, "m.pt")
-            tt.train_transformer(model, _PAIRS, epochs=2, lr=1e-3, device="cpu",
+            tt.train_transformer(model, _PAIRS, epochs=5, lr=1e-2, device="cpu",
                                  checkpoint_file=ckpt, batch_size=4)
-            self.assertTrue(os.path.exists(ckpt))
+            self.assertTrue(os.path.exists(ckpt), "checkpoint must be saved when acc improves")
             saved = torch.load(ckpt, weights_only=True, map_location="cpu")
             self.assertTrue(0.0 <= saved["best_acc"] <= 1.0)
 
@@ -148,6 +150,63 @@ class ValidationAndEarlyStop(unittest.TestCase):
                                        batch_size=4, val_frac=0.25, patience=2)
         self.assertTrue(res["stopped_early"])
         self.assertLess(res["epochs_run"], 40)
+
+
+class SeparatorToken(unittest.TestCase):
+    """Fix A: Q/R separator in make_sequence; Fix B: drop over-length pairs."""
+
+    def test_make_sequence_contains_sep_between_q_and_r(self):
+        # The separator must appear exactly once, between Q and R bytes.
+        inp, tgt = tt.make_sequence("HI", "HEY", max_len=32)
+        q_bytes = list("HI".encode("ascii"))
+        r_bytes = list("HEY".encode("ascii"))
+        # SEP_TOKEN should appear right after Q bytes
+        sep_idx = len(q_bytes)
+        self.assertEqual(inp[sep_idx], tt.SEP_TOKEN,
+                         f"Expected SEP at idx {sep_idx}, got {inp[sep_idx]}")
+        # R bytes follow SEP
+        self.assertEqual(inp[sep_idx + 1 : sep_idx + 1 + len(r_bytes)], r_bytes)
+
+    def test_make_sequence_ends_with_eos(self):
+        inp, tgt = tt.make_sequence("HI", "HEY", max_len=32)
+        self.assertEqual(inp[-1], tt.EOS_TOKEN)
+
+    def test_build_sequences_drops_pairs_that_need_truncation(self):
+        # A pair that would overflow max_len should be dropped, not truncated.
+        # With SEP + EOS, the threshold is len(q) + 1 + len(r) + 1 <= max_len
+        long_q  = "A" * 10
+        long_r  = "B" * 10          # 10 + 1 + 10 + 1 = 22, fits max_len=24
+        tight_r = "C" * 13          # 10 + 1 + 13 + 1 = 25, doesn't fit max_len=24
+
+        fits_pairs    = [(long_q, long_r)]
+        too_long_pairs = [(long_q, tight_r)]
+
+        seqs_ok  = tt._build_sequences(fits_pairs, max_len=24)
+        seqs_bad = tt._build_sequences(too_long_pairs, max_len=24)
+
+        self.assertEqual(len(seqs_ok[0]),  1, "Fitting pair should be included")
+        self.assertEqual(len(seqs_bad[0]), 0, "Over-length pair should be dropped, not truncated")
+
+    def test_generate_output_excludes_sep_token(self):
+        # generate() should inject SEP after the prompt but strip it from output.
+        # Use a stub model that emits SEP then 'X' (88) then EOS.
+        class StubSepModel:
+            max_len = 32
+            scripted = [tt.SEP_TOKEN, 88, tt.EOS_TOKEN]
+            calls = 0
+            def eval(self): return self
+            def to(self, d): return self
+            def __call__(self, x):
+                tok = self.scripted[self.calls] if self.calls < len(self.scripted) else tt.EOS_TOKEN
+                self.calls += 1
+                logits = torch.full((1, x.shape[1], tt.VOCAB_SIZE), -10.0)
+                logits[0, -1, tok] = 50.0
+                return logits
+
+        m = StubSepModel()
+        out = tt.generate(m, "HELLO", max_new=10, temperature=1.0, device="cpu")
+        self.assertNotIn(chr(tt.SEP_TOKEN), out, "SEP token must not appear in generate() output")
+        self.assertEqual(out, "X", f"Expected 'X', got {repr(out)}")
 
 
 if __name__ == "__main__":

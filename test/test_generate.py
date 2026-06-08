@@ -49,11 +49,11 @@ class StubModel:
 
 class GeneratePromptHandling(unittest.TestCase):
     def test_feeds_full_prompt_when_it_fits(self):
-        # "HELLO" (5 bytes) fits in ctx 64 — the model must see all 5 tokens,
-        # not max_len - max_new = 4.
+        # "HELLO" (5 bytes) + SEP (1) injected by generate() = 6 tokens total.
+        # The model must see all 6, not fewer.
         m = StubModel(max_len=64, scripted=[])  # emit EOS immediately
         out = generate(m, "HELLO", max_new=60, temperature=1.0, device="cpu")
-        self.assertEqual(m.seen_lens[0], len(encode("HELLO")))
+        self.assertEqual(m.seen_lens[0], len(encode("HELLO")) + 1)  # +1 for SEP
         self.assertEqual(out, "")
 
     def test_does_not_drop_first_generated_token(self):
