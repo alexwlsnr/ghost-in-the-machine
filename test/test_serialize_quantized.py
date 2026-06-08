@@ -137,15 +137,17 @@ def test_manifest_structure() -> None:
         # Old top-level 'scales' key should NOT be present (scales are per-section now)
         check("scales" not in manifest, f"bits={bits}: no top-level 'scales' key")
 
-        expected_fmt = {32: "fp32", 8: "int8", 4: "int4"}[bits]
+        expected_fmt = {32: "fp32", 8: "int8", 4: "int4g"}[bits]
         check(manifest["weight_format"] == expected_fmt,
               f"bits={bits}: weight_format == '{expected_fmt}'")
 
-        # Check that quantized sections have a 'scale' field and fp32 sections don't
+        # Check that quantized sections have appropriate scale fields
         for name, sec in manifest["sections"].items():
             dtype = sec["dtype"]
-            if dtype in ("int8", "int4"):
+            if dtype == 'int8':
                 check("scale" in sec, f"bits={bits}: section '{name}' has scale")
+            elif dtype == 'int4g':
+                check("scales_offset" in sec, f"bits={bits}: section '{name}' has scales_offset")
             else:
                 check(dtype == "float32", f"bits={bits}: section '{name}' dtype is float32")
                 check("scale" not in sec, f"bits={bits}: fp32 section '{name}' has no scale")
@@ -359,6 +361,93 @@ if __name__ == "__main__":
     test_4bit_grouped_better_accuracy_than_per_tensor()
     test_4bit_grouped_zeros()
     test_4bit_grouped_group_size_divides_evenly()
+
+    print(f"\n{'='*50}")
+    print(f"Results: {PASS} passed, {FAIL} failed")
+    if FAIL > 0:
+        sys.exit(1)
+    else:
+        print("All tests passed!")
+
+
+def test_modern_arch_serializes_without_error():
+    """TinyTransformerModern checkpoint should serialize to valid bin/json."""
+    import tempfile, os
+    sys.path.insert(0, str(ROOT / "py"))
+    from train_transformer import TinyTransformerModern
+    import torch
+
+    model = TinyTransformerModern(vocab_size=16, d_model=8, n_heads=2,
+                                   n_layers=1, d_ff=32, max_len=8,
+                                   use_rope=False)
+    with tempfile.TemporaryDirectory() as td:
+        # Save a minimal checkpoint
+        ckpt = {
+            'model_state': model.state_dict(),
+            'architecture': {
+                'arch': 'modern', 'vocab_size': 16, 'd_model': 8,
+                'n_heads': 2, 'n_layers': 1, 'd_ff': 32, 'max_len': 8,
+            },
+            'best_val_loss': 0.5,
+            'epoch': 10,
+        }
+        ckpt_path = os.path.join(td, 'test_modern.pt')
+        torch.save(ckpt, ckpt_path)
+
+        from serialize import serialize
+        prefix = os.path.join(td, 'model_modern')
+        serialize(ckpt_path, prefix, weight_bits=8)
+        check(os.path.exists(f"{prefix}.bin"), "modern .bin missing")
+        check(os.path.exists(f"{prefix}.json"), "modern .json missing")
+
+
+def test_modern_arch_swiglu_sections_present():
+    """Modern arch should have ff_gate weight sections (SwiGLU)."""
+    import tempfile, os, json
+    sys.path.insert(0, str(ROOT / "py"))
+    from train_transformer import TinyTransformerModern
+    import torch
+
+    model = TinyTransformerModern(vocab_size=16, d_model=8, n_heads=2,
+                                   n_layers=1, d_ff=32, max_len=8,
+                                   use_rope=False, use_swiglu=True)
+    with tempfile.TemporaryDirectory() as td:
+        ckpt = {
+            'model_state': model.state_dict(),
+            'architecture': {
+                'arch': 'modern', 'use_swiglu': True,
+                'vocab_size': 16, 'd_model': 8, 'n_heads': 2,
+                'n_layers': 1, 'd_ff': 32, 'max_len': 8,
+            },
+            'best_val_loss': 0.5, 'epoch': 10,
+        }
+        ckpt_path = os.path.join(td, 'test_swiglu.pt')
+        torch.save(ckpt, ckpt_path)
+        from serialize import serialize
+        prefix = os.path.join(td, 'model_swiglu')
+        serialize(ckpt_path, prefix, weight_bits=32)
+        manifest = json.loads(open(f"{prefix}.json").read())
+        secs = manifest['sections']
+        # SwiGLU should produce enc0_ff_gate and enc0_ff_val sections
+        check('enc0_ff_gate_weight' in secs, "SwiGLU gate section missing")
+        check('enc0_ff_val_weight'  in secs, "SwiGLU val section missing")
+        check('enc0_ff2_weight'     in secs, "SwiGLU out section missing")
+
+
+if __name__ == "__main__":
+    test_manifest_structure()
+    test_compression_ratios()
+    test_fp32_roundtrip()
+    test_8bit_quantization_accuracy()
+    test_4bit_quantization_accuracy()
+    test_zeros_stay_zero()
+    test_mixed_precision_layout()
+    test_4bit_grouped_output_size()
+    test_4bit_grouped_better_accuracy_than_per_tensor()
+    test_4bit_grouped_zeros()
+    test_4bit_grouped_group_size_divides_evenly()
+    test_modern_arch_serializes_without_error()
+    test_modern_arch_swiglu_sections_present()
 
     print(f"\n{'='*50}")
     print(f"Results: {PASS} passed, {FAIL} failed")
