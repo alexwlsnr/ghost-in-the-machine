@@ -154,5 +154,62 @@ class SampleStrata(unittest.TestCase):
                          "Output should not be stratum-sorted")
 
 
+class NormaliseNames(unittest.TestCase):
+
+    def test_prefix_vocative_with_comma(self):
+        self.assertEqual(
+            ss.normalise_names("OH, CARLATON! HOW DID YOU SELL IT?"),
+            "OH, HUMAN! HOW DID YOU SELL IT?"
+        )
+
+    def test_prefix_vocative_hey(self):
+        self.assertEqual(
+            ss.normalise_names("HEY, PRANAV. WHAT'S UP?"),
+            "HEY, HUMAN. WHAT'S UP?"
+        )
+
+    def test_prefix_vocative_no_comma(self):
+        self.assertEqual(
+            ss.normalise_names("HI GENAVIEVE, IT HAS BEEN A WHILE."),
+            "HI HUMAN, IT HAS BEEN A WHILE."
+        )
+
+    def test_suffix_vocative(self):
+        self.assertEqual(
+            ss.normalise_names("NOT TOO GOOD, PRANAV."),
+            "NOT TOO GOOD, HUMAN."
+        )
+
+    def test_suffix_mid_sentence(self):
+        self.assertEqual(
+            ss.normalise_names("THANK YOU, ALEXANDRO. I REALLY APPRECIATE IT."),
+            "THANK YOU, HUMAN. I REALLY APPRECIATE IT."
+        )
+
+    def test_keep_common_words(self):
+        # Words like WELL, YEAH, SURE should not be replaced
+        self.assertEqual(ss.normalise_names("OH, WELL. THAT'S NICE."),   "OH, WELL. THAT'S NICE.")
+        self.assertEqual(ss.normalise_names("HEY, THERE! HOW ARE YOU?"), "HEY, THERE! HOW ARE YOU?")
+        self.assertEqual(ss.normalise_names("THANKS, YEAH. GOT IT."),    "THANKS, YEAH. GOT IT.")
+
+    def test_no_names_unchanged(self):
+        self.assertEqual(
+            ss.normalise_names("I'M DOING WELL, THANKS."),
+            "I'M DOING WELL, THANKS."
+        )
+
+    def test_custom_placeholder(self):
+        self.assertEqual(
+            ss.normalise_names("OH, CARLATON!", placeholder="FRIEND"),
+            "OH, FRIEND!"
+        )
+
+    def test_applied_to_both_sides_in_sample_strata(self):
+        pairs = [("HEY, TREVIN. WHAT'S UP?", "NOT MUCH, JUST HANGING OUT.")]
+        result = ss.sample_strata(pairs, targets={"greetings": 10})
+        queries = [q for q, _, _ in result]
+        self.assertIn("HEY, HUMAN. WHAT'S UP?", queries)
+
+
 if __name__ == "__main__":
     unittest.main()

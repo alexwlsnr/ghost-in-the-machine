@@ -124,6 +124,51 @@ _REJECT_PATTERNS: list[re.Pattern] = [
     ]
 ]
 
+# ── Name normalisation ───────────────────────────────────────────────────────
+# SODA dialogues involve named fictional characters. Replace apparent proper
+# names in vocative positions with a generic placeholder so the model learns
+# "HELLO HUMAN!" rather than "HELLO CARLATON!".
+
+# Words that appear in vocative position but should NOT be replaced
+_NAME_KEEP: frozenset = frozenset([
+    "WELL", "YEAH", "YEP", "YES", "NO", "NOPE", "OKAY", "OK",
+    "SURE", "RIGHT", "TRUE", "GOOD", "GREAT", "NICE", "COOL",
+    "THERE", "HERE", "EVERYONE", "GUYS", "ALL", "BOTH",
+    "GOD", "LORD", "MAN", "WOW", "WAIT", "NOW", "THEN",
+    "THANKS", "SORRY", "PLEASE", "THANK", "HELLO", "HI", "HEY", "OH",
+    "WHAT", "HOW", "WHY", "WHO", "WHERE", "WHEN",
+    "NOT", "JUST", "REALLY", "VERY", "SO", "STILL",
+])
+
+# Prefix vocative: HEY/OH/HI[,] NAME  →  HEY, HUMAN
+_PREFIX_VOC = re.compile(
+    r'\b(OH|HEY|HI|HELLO|THANKS|SORRY)([,\s]+)([A-Z]{2,})\b',
+    re.IGNORECASE,
+)
+# Suffix vocative: ", NAME." or ", NAME!" — only before sentence-ending punctuation
+_SUFFIX_VOC = re.compile(
+    r',\s+([A-Z]{2,})([.!?])',
+    re.IGNORECASE,
+)
+
+
+def normalise_names(text: str, placeholder: str = "HUMAN") -> str:
+    """Replace apparent character names in vocative positions with placeholder."""
+    def _swap(word: str) -> str:
+        return word if word.upper() in _NAME_KEEP else placeholder
+
+    def _prefix(m: re.Match) -> str:
+        sep = ", " if "," in m.group(2) else " "
+        return m.group(1) + sep + _swap(m.group(3))
+
+    def _suffix(m: re.Match) -> str:
+        return ", " + _swap(m.group(1)) + m.group(2)
+
+    text = _PREFIX_VOC.sub(_prefix, text)
+    text = _SUFFIX_VOC.sub(_suffix, text)
+    return text
+
+
 # Default targets per stratum.
 # meta and jokes are excluded from SODA sourcing (0) — SODA's versions are
 # character-specific dialogue, not AI self-description or joke setups.
@@ -190,7 +235,7 @@ def sample_strata(
     for q, r in pairs:
         stratum = classify(q, r)
         if stratum and stratum in buckets:
-            buckets[stratum].append((q, r))
+            buckets[stratum].append((normalise_names(q), normalise_names(r)))
 
     result: list[tuple[str, str, str]] = []
     for stratum, target in targets.items():
