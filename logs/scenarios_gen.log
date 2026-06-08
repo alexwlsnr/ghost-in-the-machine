@@ -1,0 +1,81 @@
+Generating up to 5000 pairs via 16 workers...
+  100/15000 attempts, 78 valid
+  200/15000 attempts, 154 valid
+  300/15000 attempts, 229 valid
+  400/15000 attempts, 293 valid
+  500/15000 attempts, 371 valid
+  600/15000 attempts, 438 valid
+  700/15000 attempts, 513 valid
+  800/15000 attempts, 590 valid
+  900/15000 attempts, 659 valid
+  1000/15000 attempts, 725 valid
+  1100/15000 attempts, 798 valid
+  1200/15000 attempts, 866 valid
+  1300/15000 attempts, 940 valid
+  1400/15000 attempts, 1011 valid
+  1500/15000 attempts, 1086 valid
+  1600/15000 attempts, 1160 valid
+  1700/15000 attempts, 1231 valid
+  1800/15000 attempts, 1305 valid
+  1900/15000 attempts, 1380 valid
+  2000/15000 attempts, 1461 valid
+  2100/15000 attempts, 1534 valid
+  2200/15000 attempts, 1607 valid
+  2300/15000 attempts, 1679 valid
+  2400/15000 attempts, 1750 valid
+  2500/15000 attempts, 1823 valid
+  2600/15000 attempts, 1889 valid
+  2700/15000 attempts, 1972 valid
+  2800/15000 attempts, 2044 valid
+  2900/15000 attempts, 2119 valid
+  3000/15000 attempts, 2182 valid
+  3100/15000 attempts, 2259 valid
+  3200/15000 attempts, 2327 valid
+  3300/15000 attempts, 2406 valid
+  3400/15000 attempts, 2472 valid
+  3500/15000 attempts, 2546 valid
+  3600/15000 attempts, 2623 valid
+  3700/15000 attempts, 2699 valid
+  3800/15000 attempts, 2772 valid
+  3900/15000 attempts, 2849 valid
+  4000/15000 attempts, 2916 valid
+  4100/15000 attempts, 2982 valid
+  4200/15000 attempts, 3056 valid
+  4300/15000 attempts, 3132 valid
+  4400/15000 attempts, 3193 valid
+  4500/15000 attempts, 3268 valid
+  4600/15000 attempts, 3338 valid
+  4700/15000 attempts, 3412 valid
+  4800/15000 attempts, 3483 valid
+  4900/15000 attempts, 3555 valid
+  5000/15000 attempts, 3627 valid
+  5100/15000 attempts, 3694 valid
+  5200/15000 attempts, 3765 valid
+  5300/15000 attempts, 3847 valid
+  5400/15000 attempts, 3919 valid
+  5500/15000 attempts, 3995 valid
+  5600/15000 attempts, 4065 valid
+  5700/15000 attempts, 4143 valid
+  5800/15000 attempts, 4214 valid
+  5900/15000 attempts, 4287 valid
+  6000/15000 attempts, 4368 valid
+  6100/15000 attempts, 4442 valid
+  6200/15000 attempts, 4513 valid
+  6300/15000 attempts, 4587 valid
+  6400/15000 attempts, 4657 valid
+  6500/15000 attempts, 4733 valid
+  6600/15000 attempts, 4806 valid
+  6700/15000 attempts, 4885 valid
+  6800/15000 attempts, 4952 valid
+
+Stratum breakdown:
+  emotional   : 1128
+  greetings   : 740
+  opinions    : 713
+  reactions   : 661
+  meta        : 628
+  small_talk  : 608
+  jokes       : 522
+
+Total: 5000 pairs
+Written → data/scenarios.txt

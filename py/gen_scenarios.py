@@ -204,23 +204,27 @@ def main():
     seen: set[tuple[str, str]] = set()
     done = 0
 
+    os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
     print(f"Generating up to {args.pairs} pairs via {args.workers} workers...")
 
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = {ex.submit(generate_pair, args.endpoint, args.model, s, args.max_ctx): s
-                for s in scenario_pool}
-        for fut in as_completed(futs):
-            done += 1
-            res = fut.result()
-            if res:
-                q, r, stratum = res
-                if (q, r) not in seen:
-                    seen.add((q, r))
-                    results.append((q, r, stratum))
-            if done % 100 == 0:
-                print(f"  {done}/{len(scenario_pool)} attempts, {len(results)} valid", flush=True)
-            if len(results) >= args.pairs:
-                break
+    with open(args.output, "w") as out_f:
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futs = {ex.submit(generate_pair, args.endpoint, args.model, s, args.max_ctx): s
+                    for s in scenario_pool}
+            for fut in as_completed(futs):
+                done += 1
+                res = fut.result()
+                if res:
+                    q, r, stratum = res
+                    if (q, r) not in seen:
+                        seen.add((q, r))
+                        results.append((q, r, stratum))
+                        out_f.write(f"{q}|{r}\n")
+                        out_f.flush()
+                if done % 100 == 0:
+                    print(f"  {done}/{len(scenario_pool)} attempts, {len(results)} valid", flush=True)
+                if len(results) >= args.pairs:
+                    break
 
     from collections import Counter
     counts = Counter(s for _, _, s in results)
@@ -229,10 +233,6 @@ def main():
         print(f"  {s:12s}: {n}")
     print(f"\nTotal: {len(results)} pairs")
 
-    os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
-    with open(args.output, "w") as f:
-        for q, r, _ in results:
-            f.write(f"{q}|{r}\n")
     print(f"Written → {args.output}")
 
 
