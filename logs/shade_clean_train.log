@@ -1,0 +1,66 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+Loaded 29307 training pairs
+Device: cuda
+Training on 29307 pairs, 600 epochs
+Sequences — train: 26515, val: 1406
+Parameters: 10,894,848
+Mixed precision: bf16 autocast enabled
+  Epoch    5/600: loss=0.8916, acc=0.721, val_loss=0.8057
+  Epoch   10/600: loss=0.7878, acc=0.750, val_loss=0.7259
+  Epoch   15/600: loss=0.7400, acc=0.764, val_loss=0.6919
+  Epoch   20/600: loss=0.7094, acc=0.773, val_loss=0.6713
+  Epoch   25/600: loss=0.6853, acc=0.780, val_loss=0.6573
+  Epoch   30/600: loss=0.6659, acc=0.785, val_loss=0.6440
+  Epoch   35/600: loss=0.6512, acc=0.789, val_loss=0.6380
+  Epoch   40/600: loss=0.6390, acc=0.793, val_loss=0.6306
+  Epoch   45/600: loss=0.6276, acc=0.796, val_loss=0.6208
+  Epoch   50/600: loss=0.6181, acc=0.799, val_loss=0.6192
+  Epoch   55/600: loss=0.6097, acc=0.801, val_loss=0.6143
+  Epoch   60/600: loss=0.6023, acc=0.803, val_loss=0.6126
+  Epoch   65/600: loss=0.5962, acc=0.805, val_loss=0.6101
+  Epoch   70/600: loss=0.5905, acc=0.807, val_loss=0.6090
+  Epoch   75/600: loss=0.5852, acc=0.808, val_loss=0.6096
+  Epoch   80/600: loss=0.5796, acc=0.810, val_loss=0.6098
+  Epoch   85/600: loss=0.5751, acc=0.811, val_loss=0.6080
+  Epoch   90/600: loss=0.5713, acc=0.812, val_loss=0.6007
+  Epoch   95/600: loss=0.5670, acc=0.814, val_loss=0.6029
+  Epoch  100/600: loss=0.5632, acc=0.814, val_loss=0.6052
+  Epoch  105/600: loss=0.5592, acc=0.816, val_loss=0.6012
+  Epoch  110/600: loss=0.5560, acc=0.817, val_loss=0.6000
+  Epoch  115/600: loss=0.5527, acc=0.818, val_loss=0.5987
+  Epoch  120/600: loss=0.5496, acc=0.819, val_loss=0.6001
+  Epoch  125/600: loss=0.5467, acc=0.819, val_loss=0.5996
+  Epoch  130/600: loss=0.5439, acc=0.820, val_loss=0.6015
+  Epoch  135/600: loss=0.5413, acc=0.821, val_loss=0.5977
+  Epoch  140/600: loss=0.5382, acc=0.822, val_loss=0.6035
+  Epoch  145/600: loss=0.5356, acc=0.823, val_loss=0.6050
+  Epoch  150/600: loss=0.5338, acc=0.823, val_loss=0.5986
+  Epoch  155/600: loss=0.5312, acc=0.824, val_loss=0.6001
+  Epoch  160/600: loss=0.5290, acc=0.824, val_loss=0.6010
+  Epoch  165/600: loss=0.5269, acc=0.825, val_loss=0.6024
+  Epoch  170/600: loss=0.5246, acc=0.826, val_loss=0.6020
+  Epoch  175/600: loss=0.5220, acc=0.827, val_loss=0.6001
+  Epoch  180/600: loss=0.5205, acc=0.827, val_loss=0.6013
+  Epoch  185/600: loss=0.5183, acc=0.827, val_loss=0.5989
+  Epoch  190/600: loss=0.5159, acc=0.828, val_loss=0.6025
+  Epoch  195/600: loss=0.5149, acc=0.829, val_loss=0.6013
+  Epoch  200/600: loss=0.5129, acc=0.829, val_loss=0.6012
+  Epoch  205/600: loss=0.5112, acc=0.829, val_loss=0.6049
+  Epoch  210/600: loss=0.5096, acc=0.830, val_loss=0.5992
+  Epoch  215/600: loss=0.5075, acc=0.831, val_loss=0.6024
+  Epoch  220/600: loss=0.5056, acc=0.831, val_loss=0.6042
+  Epoch  225/600: loss=0.5038, acc=0.832, val_loss=0.6020
+  Epoch  230/600: loss=0.5025, acc=0.832, val_loss=0.6048
+  Epoch  235/600: loss=0.5007, acc=0.832, val_loss=0.6040
+
+Early stop at epoch 236 (no val improvement for 50 epochs)
+
+Best acc: 0.828 at epoch 186
+
+Sample generations:
+  HELLO                → HEY HUMAN! I'M GLAD WE CHAT ABOUT SOMETHING FUN TO
+  HOW ARE YOU          → I AM DOING WONDERFULLY, THANK YOU FOR ASKING, HUMA
+  TELL ME A JOKE       → WHY DID THE BONE GO TO THE DANCE? BECAUSE THEY HAD
+  WHO ARE YOU          → I AM GHOST, A TINY BYTE-LEVEL ASSISTANT WITH LITTL
+  THANKS               → YOU WORKED REALLY HARD TO MAKE SURE YOU HAVE THE C
