@@ -250,15 +250,26 @@ def split_pairs(pairs, val_frac: float, seed: int = 0):
 
 
 def _build_sequences(pairs, max_len: int, preserve_case: bool = False, truncate: bool = False):
-    """Tokenize pairs into (inputs, targets), dropping empty / too-short ones."""
+    """Tokenize pairs into (inputs, targets), dropping empty / too-short ones.
+
+    Accepts either single-turn (q, r) tuples or multi-turn [(q1,r1),(q2,r2),...]
+    lists. Multi-turn items use make_sequence_multiturn(); single-turn items use
+    make_sequence() for backward compatibility with existing callers.
+    """
     inputs, targets = [], []
-    for q, r in pairs:
-        if not q or not r:
+    for item in pairs:
+        # Normalise: bare (q, r) tuple → single-element turn list
+        turns = [item] if isinstance(item, tuple) else list(item)
+        if not turns or not all(q and r for q, r in turns):
             continue
-        q_norm = q.strip() if preserve_case else q.upper().strip()
-        r_norm = r.strip() if preserve_case else r.upper().strip()
-        inp, tgt = make_sequence(q_norm, r_norm, max_len, truncate=truncate)
-        # make_sequence returns [] when truncate=False and pair is over-length.
+        if not preserve_case:
+            turns = [(q.upper().strip(), r.upper().strip()) for q, r in turns]
+        else:
+            turns = [(q.strip(), r.strip()) for q, r in turns]
+        if len(turns) == 1:
+            inp, tgt = make_sequence(turns[0][0], turns[0][1], max_len, truncate=truncate)
+        else:
+            inp, tgt = make_sequence_multiturn(turns, max_len)
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -626,17 +637,22 @@ if __name__ == '__main__':
     else:
         device = args.device
 
-    # Load training data
+    # Load training data — supports both single-turn (Q|R) and multi-turn (Q1|R1|Q2|R2|...) lines.
     pairs = []
+    n_multiturn = 0
     with open(args.file) as f:
         for line in f:
             line = line.strip()
-            if not line or '|' not in line:
+            turns = parse_multiturn_line(line)
+            if not turns:
                 continue
-            q, r = line.split('|', 1)
-            pairs.append((q.strip(), r.strip()))
+            if len(turns) == 1:
+                pairs.append(turns[0])  # (q, r) tuple — handled by existing path
+            else:
+                pairs.append(turns)     # list of (q,r) — multi-turn path
+                n_multiturn += 1
 
-    print(f"Loaded {len(pairs)} training pairs")
+    print(f"Loaded {len(pairs)} training items ({n_multiturn} multi-turn)")
 
     # Create or resume model
     if args.resume and __import__('os').path.exists(args.resume):
