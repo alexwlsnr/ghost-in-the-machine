@@ -19,12 +19,18 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Build Wasm kernel
+      - name: Build Wasm kernel (scalar)
         working-directory: wasm
         run: cargo build --target wasm32-unknown-unknown --release
 
-      - name: Copy Wasm to dist
-        run: cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/
+      - name: Build Wasm kernel (SIMD)
+        working-directory: wasm
+        run: RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release
+
+      - name: Copy Wasm kernels to dist
+        run: |
+          cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel.wasm
+          cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel_simd.wasm
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
