@@ -892,6 +892,11 @@ if __name__ == '__main__':
                         help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
     parser.add_argument('--mask-query-loss', action='store_true',
                         help='only compute loss on response tokens (masks query positions)')
+    # Fine-grained modern arch overrides (only apply when --arch modern)
+    parser.add_argument('--no-rope',      action='store_true', help='disable RoPE (use learned pos embed)')
+    parser.add_argument('--no-swiglu',    action='store_true', help='disable SwiGLU (use ReLU FFN)')
+    parser.add_argument('--no-rmsnorm',   action='store_true', help='disable RMSNorm (use LayerNorm)')
+    parser.add_argument('--no-tie-weights', action='store_true', help='disable weight tying')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -942,6 +947,10 @@ if __name__ == '__main__':
                 n_layers=args.n_layers,
                 d_ff=args.d_ff,
                 max_len=args.max_len,
+                use_rope=not args.no_rope,
+                use_swiglu=not args.no_swiglu,
+                use_rmsnorm=not args.no_rmsnorm,
+                tie_weights=not args.no_tie_weights,
             )
         else:
             model = TinyTransformer(
