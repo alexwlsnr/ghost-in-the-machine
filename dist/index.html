@@ -554,8 +554,8 @@ async function switchModel(id) {
   try {
     const loaded = await loadModel({
       wasm: activeWasmFile(),
-      bin:  `./${reg.bin}?v=1`,
-      json: `./${reg.json}?v=1`,
+      bin:  modelUrls(reg).bin,
+      json: modelUrls(reg).json,
       onProgress: (pct) => {
         loadingFill.style.width = pct + '%';
         const fill = document.getElementById(`chip-fill-${reg.id}`);
@@ -596,6 +596,13 @@ async function switchModel(id) {
 // ── Active model accessor ─────────────────────────────────────────────────
 function activeModel() {
   return modelCache[activeId] || null;
+}
+
+// Resolve bin/json URLs — prefer bin_url/json_url (GitHub Releases) over local path
+function modelUrls(reg) {
+  const bin  = reg.bin_url  ? reg.bin_url  : `./${reg.bin}?v=1`;
+  const json = reg.json_url ? reg.json_url : `./${reg.json}?v=1`;
+  return { bin, json };
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────
@@ -667,8 +674,8 @@ async function boot() {
   try {
     const loaded = await loadModel({
       wasm: activeWasmFile(),
-      bin:  `./${defaultModel.bin}?v=1`,
-      json: `./${defaultModel.json}?v=1`,
+      bin:  modelUrls(defaultModel).bin,
+      json: modelUrls(defaultModel).json,
       onProgress: (pct) => { loadingFill.style.width = (10 + pct * 0.9) + '%'; },
     });
 

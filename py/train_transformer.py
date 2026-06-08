@@ -362,8 +362,10 @@ def train_transformer(
             _ws = _mod.write_status
         _write_status = _ws
 
+    from datetime import datetime
     print(f"Device: {device}")
     print(f"Training on {len(pairs)} pairs, {epochs} epochs")
+    print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
     model = model.to(device)
     model.train()
@@ -479,7 +481,9 @@ def train_transformer(
             model.train()
 
         if (epoch + 1) % 5 == 0:
-            msg = f"  Epoch {epoch + 1:4d}/{epochs}: loss={avg_loss:.4f}, acc={acc:.3f}"
+            from datetime import datetime
+            ts = datetime.utcnow().strftime('%H:%M:%S')
+            msg = f"  [{ts}] Epoch {epoch + 1:4d}/{epochs}: loss={avg_loss:.4f}, acc={acc:.3f}"
             if val_loss is not None:
                 msg += f", val_loss={val_loss:.4f}"
             print(msg)
@@ -542,7 +546,8 @@ def train_transformer(
             pid=os.getpid(), checkpoint=checkpoint_file, eta_seconds=0,
         )
 
-    print(f"\nBest acc: {best_acc:.3f} at epoch {best_epoch}")
+    print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"Best acc: {best_acc:.3f} at epoch {best_epoch}")
     return {
         'model': model,
         'epochs_run': epoch + 1,
