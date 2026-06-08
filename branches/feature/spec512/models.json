@@ -75,26 +75,26 @@
     {
       "id": "spec512",
       "name": "Spec512",
-      "description": "27.6M params \u00b7 28MB \u00b7 multi-turn \u00b7 ctx 1024",
+      "description": "27.6M params \u00b7 27MB \u00b7 multi-turn \u00b7 ctx 1024",
       "bin": "model_spec512_8bit.bin",
       "json": "model_spec512_8bit.json",
-      "size_mb": 28,
+      "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
       "default": false,
-      "available": false
+      "available": true
     },
     {
       "id": "spec512-fp32",
       "name": "Spec512 fp32",
-      "description": "27.6M params \u00b7 105MB \u00b7 reference",
+      "description": "27.6M params \u00b7 99MB \u00b7 reference",
       "bin": "model_spec512_fp32.bin",
       "json": "model_spec512_fp32.json",
-      "size_mb": 105,
+      "size_mb": 99,
       "params": "27.6M",
       "ctx": 1024,
       "default": false,
-      "available": false
+      "available": true
     }
   ]
 }
