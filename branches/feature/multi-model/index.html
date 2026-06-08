@@ -563,13 +563,12 @@ async function boot() {
     if (!simdSupported || isSwitching) return;
     simdEnabled = !simdEnabled;
     updateSimdBadge();
-    // Drop all cached models so next load uses the newly selected kernel
+    // Drop cached models so next load uses the new kernel.
+    // Keep activeId intact so input stays enabled during the reload.
+    const prev = activeId;
     modelCache = {};
     kvCaches   = {};
-    const prev = activeId;
-    activeId   = null;
-    setInputEnabled(false);
-    appendLine(`KERNEL: switched to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading ${prev || ''}...`, 'boot');
+    appendLine(`KERNEL: switching to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading...`, 'boot');
     if (prev) switchToModel(prev);
   });
 
