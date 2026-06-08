@@ -28,8 +28,6 @@
       "id": "shade-fp32",
       "name": "Shade fp32",
       "description": "10.9M params · 42MB · reference",
-      "bin_url": "https://github.com/alexwlsnr/ghost-in-the-machine/releases/download/models-v1/model_shade_fp32.bin",
-      "json_url": "https://github.com/alexwlsnr/ghost-in-the-machine/releases/download/models-v1/model_shade_fp32.json",
       "bin": "model_shade_fp32.bin",
       "json": "model_shade_fp32.json",
       "size_mb": 42,
@@ -88,20 +86,6 @@
       "available": true
     },
     {
-      "id": "spec512-fp32",
-      "name": "Spec512 fp32",
-      "description": "27.6M params · 99MB · reference",
-      "bin_url": "https://github.com/alexwlsnr/ghost-in-the-machine/releases/download/models-v1/model_spec512_fp32.bin",
-      "json_url": "https://github.com/alexwlsnr/ghost-in-the-machine/releases/download/models-v1/model_spec512_fp32.json",
-      "bin": "model_spec512_fp32.bin",
-      "json": "model_spec512_fp32.json",
-      "size_mb": 99,
-      "params": "27.6M",
-      "ctx": 1024,
-      "default": false,
-      "available": true
-    },
-    {
       "id": "spec512-4bit",
       "name": "Spec512 4-bit",
       "description": "27.6M params · 18MB · grouped quant · ctx 1024",
@@ -111,6 +95,18 @@
       "params": "27.6M",
       "ctx": 1024,
       "max_new": 80,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "spec512-fp32",
+      "name": "Spec512 fp32",
+      "description": "27.6M params · 99MB · reference",
+      "bin": "model_spec512_fp32.bin",
+      "json": "model_spec512_fp32.json",
+      "size_mb": 99,
+      "params": "27.6M",
+      "ctx": 1024,
       "default": false,
       "available": true
     },
