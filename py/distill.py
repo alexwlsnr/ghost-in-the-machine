@@ -72,22 +72,31 @@ Rules:
 
 Output exactly 20 lines:"""
 
-# Template for generating a single response
-RESPONSE_PROMPT = """You are a friendly, helpful assistant having a casual conversation. 
-Respond to this message naturally and concisely (10-50 characters is ideal, but use what feels natural):
+# System prompt for consistent assistant behavior
+SYSTEM_PROMPT = (
+    "You are a friendly, helpful AI assistant having a natural conversation. "
+    "Keep responses short (1-2 sentences, under 100 characters). "
+    "Match the user's tone — casual for casual, brief for brief. "
+    "Never ask follow-up questions. Never repeat the user's words back. "
+    "Just respond directly and naturally, like a real chat."
+)
 
-User: {query}
-Assistant:"""
+# Template for generating a single response (system prompt sets behavior)
+RESPONSE_USER_TMPL = "Respond to: {query}"
 
 
 def chat_completion(endpoint: str, model: str, messages: list,
                     max_tokens: int = 80, temperature: float = 0.8,
-                    api_key: str = "") -> str:
+                    api_key: str = "", system: str = "") -> str:
     """Call an OpenAI-compatible chat completions API."""
-    url = endpoint.rstrip("/")
+    url = endpoint.rstrip("/") + "/chat/completions"
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.extend(messages)
     body = json.dumps({
         "model": model,
-        "messages": messages,
+        "messages": msgs,
         "max_tokens": max_tokens,
         "temperature": temperature,
     }).encode("utf-8")
@@ -118,10 +127,11 @@ def generate_response(endpoint: str, model: str, query: str, api_key: str = "") 
     try:
         resp = chat_completion(
             endpoint, model,
-            messages=[{"role": "user", "content": RESPONSE_PROMPT.format(query=query)}],
+            messages=[{"role": "user", "content": RESPONSE_USER_TMPL.format(query=query)}],
             max_tokens=60,
             temperature=0.8,
             api_key=api_key,
+            system=SYSTEM_PROMPT,
         )
         # Clean up: remove quotes, strip emoji and non-ASCII
         resp = resp.strip().strip('"').strip("'")

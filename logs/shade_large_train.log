@@ -1,0 +1,94 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+Loaded 37307 training pairs
+Device: cuda
+Training on 37307 pairs, 600 epochs
+Sequences — train: 35441, val: 1865
+Parameters: 10,894,848
+Mixed precision: bf16 autocast enabled
+  Epoch    5/600: loss=0.8996, acc=0.717, val_loss=0.8261
+  Epoch   10/600: loss=0.8113, acc=0.742, val_loss=0.7557
+  Epoch   15/600: loss=0.7690, acc=0.755, val_loss=0.7293
+  Epoch   20/600: loss=0.7414, acc=0.763, val_loss=0.7098
+  Epoch   25/600: loss=0.7217, acc=0.768, val_loss=0.6961
+  Epoch   30/600: loss=0.7065, acc=0.773, val_loss=0.6866
+  Epoch   35/600: loss=0.6939, acc=0.777, val_loss=0.6782
+  Epoch   40/600: loss=0.6845, acc=0.779, val_loss=0.6721
+  Epoch   45/600: loss=0.6750, acc=0.782, val_loss=0.6675
+  Epoch   50/600: loss=0.6679, acc=0.784, val_loss=0.6618
+  Epoch   55/600: loss=0.6614, acc=0.786, val_loss=0.6591
+  Epoch   60/600: loss=0.6554, acc=0.788, val_loss=0.6539
+  Epoch   65/600: loss=0.6498, acc=0.789, val_loss=0.6538
+  Epoch   70/600: loss=0.6445, acc=0.791, val_loss=0.6515
+  Epoch   75/600: loss=0.6405, acc=0.792, val_loss=0.6479
+  Epoch   80/600: loss=0.6360, acc=0.793, val_loss=0.6477
+  Epoch   85/600: loss=0.6317, acc=0.794, val_loss=0.6431
+  Epoch   90/600: loss=0.6278, acc=0.796, val_loss=0.6488
+  Epoch   95/600: loss=0.6243, acc=0.797, val_loss=0.6418
+  Epoch  100/600: loss=0.6211, acc=0.797, val_loss=0.6416
+  Epoch  105/600: loss=0.6179, acc=0.798, val_loss=0.6411
+  Epoch  110/600: loss=0.6152, acc=0.799, val_loss=0.6375
+  Epoch  115/600: loss=0.6123, acc=0.800, val_loss=0.6388
+  Epoch  120/600: loss=0.6090, acc=0.801, val_loss=0.6420
+  Epoch  125/600: loss=0.6073, acc=0.802, val_loss=0.6372
+  Epoch  130/600: loss=0.6051, acc=0.802, val_loss=0.6379
+  Epoch  135/600: loss=0.6026, acc=0.803, val_loss=0.6406
+  Epoch  140/600: loss=0.6005, acc=0.803, val_loss=0.6365
+  Epoch  145/600: loss=0.5985, acc=0.804, val_loss=0.6319
+  Epoch  150/600: loss=0.5962, acc=0.805, val_loss=0.6394
+  Epoch  155/600: loss=0.5947, acc=0.805, val_loss=0.6344
+  Epoch  160/600: loss=0.5925, acc=0.806, val_loss=0.6323
+  Epoch  165/600: loss=0.5905, acc=0.807, val_loss=0.6339
+  Epoch  170/600: loss=0.5885, acc=0.807, val_loss=0.6309
+  Epoch  175/600: loss=0.5872, acc=0.807, val_loss=0.6324
+  Epoch  180/600: loss=0.5852, acc=0.808, val_loss=0.6321
+  Epoch  185/600: loss=0.5837, acc=0.808, val_loss=0.6324
+  Epoch  190/600: loss=0.5817, acc=0.809, val_loss=0.6325
+  Epoch  195/600: loss=0.5807, acc=0.809, val_loss=0.6321
+  Epoch  200/600: loss=0.5794, acc=0.810, val_loss=0.6324
+  Epoch  205/600: loss=0.5773, acc=0.810, val_loss=0.6326
+  Epoch  210/600: loss=0.5760, acc=0.811, val_loss=0.6296
+  Epoch  215/600: loss=0.5747, acc=0.811, val_loss=0.6344
+  Epoch  220/600: loss=0.5728, acc=0.811, val_loss=0.6320
+  Epoch  225/600: loss=0.5714, acc=0.812, val_loss=0.6314
+  Epoch  230/600: loss=0.5701, acc=0.812, val_loss=0.6341
+  Epoch  235/600: loss=0.5690, acc=0.813, val_loss=0.6331
+  Epoch  240/600: loss=0.5676, acc=0.813, val_loss=0.6303
+  Epoch  245/600: loss=0.5659, acc=0.814, val_loss=0.6304
+  Epoch  250/600: loss=0.5651, acc=0.814, val_loss=0.6361
+  Epoch  255/600: loss=0.5636, acc=0.814, val_loss=0.6278
+  Epoch  260/600: loss=0.5620, acc=0.815, val_loss=0.6313
+  Epoch  265/600: loss=0.5607, acc=0.815, val_loss=0.6333
+  Epoch  270/600: loss=0.5598, acc=0.815, val_loss=0.6315
+  Epoch  275/600: loss=0.5586, acc=0.816, val_loss=0.6302
+  Epoch  280/600: loss=0.5574, acc=0.816, val_loss=0.6316
+  Epoch  285/600: loss=0.5558, acc=0.816, val_loss=0.6286
+  Epoch  290/600: loss=0.5544, acc=0.817, val_loss=0.6303
+  Epoch  295/600: loss=0.5535, acc=0.817, val_loss=0.6325
+  Epoch  300/600: loss=0.5524, acc=0.818, val_loss=0.6315
+  Epoch  305/600: loss=0.5508, acc=0.818, val_loss=0.6293
+  Epoch  310/600: loss=0.5501, acc=0.818, val_loss=0.6288
+  Epoch  315/600: loss=0.5490, acc=0.818, val_loss=0.6310
+  Epoch  320/600: loss=0.5474, acc=0.819, val_loss=0.6332
+  Epoch  325/600: loss=0.5465, acc=0.819, val_loss=0.6316
+  Epoch  330/600: loss=0.5450, acc=0.820, val_loss=0.6297
+  Epoch  335/600: loss=0.5440, acc=0.820, val_loss=0.6290
+  Epoch  340/600: loss=0.5424, acc=0.820, val_loss=0.6291
+  Epoch  345/600: loss=0.5419, acc=0.820, val_loss=0.6329
+  Epoch  350/600: loss=0.5408, acc=0.821, val_loss=0.6287
+  Epoch  355/600: loss=0.5401, acc=0.821, val_loss=0.6318
+  Epoch  360/600: loss=0.5383, acc=0.822, val_loss=0.6291
+  Epoch  365/600: loss=0.5374, acc=0.822, val_loss=0.6289
+  Epoch  370/600: loss=0.5368, acc=0.822, val_loss=0.6332
+  Epoch  375/600: loss=0.5357, acc=0.822, val_loss=0.6294
+
+Early stop at epoch 378 (no val improvement for 50 epochs)
+
+Best acc: 0.819 at epoch 328
+
+Sample generations:
+  HELLO                → OW, DASHAWN. THANK YOU FOR YOUR HELP. I REALLY APP
+  HOW ARE YOU          → FEELING FOR TOWN, CALTON? LET ME JUST GRAB MY PARE
+  TELL ME A JOKE       → WHY DID THE BONE WAS GOING TO BE TALKING TO YOU?
+  WHO ARE YOU          → I AM GHOST A FRIENDLY AI!
+  THANKS               →  TO YOU. I FEEL REALLY GOOD ABOUT SOMETHING IMPORT

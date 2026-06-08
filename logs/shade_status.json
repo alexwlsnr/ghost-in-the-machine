@@ -1,0 +1,17 @@
+{
+  "tier": "shade",
+  "phase": "training",
+  "state": "early_stopped",
+  "epochs_total": 300,
+  "checkpoint": "ckpt/shade_final.pt",
+  "updated_at": "2026-06-08T09:27:17Z",
+  "started_at": "2026-06-08T07:27:04Z",
+  "pid": 3200738,
+  "epoch": 88,
+  "train_loss": 0.753128,
+  "val_loss": 0.944893,
+  "best_val_loss": 0.923667,
+  "best_epoch": 68,
+  "stopped_early": true,
+  "eta_seconds": 0
+}

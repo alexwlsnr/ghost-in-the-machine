@@ -1,0 +1,14 @@
+{
+  "name": "tier2-ghost",
+  "private": true,
+  "type": "module",
+  "description": "Ghost in the Machine — build + test orchestration for the Tier 2.5 µLM",
+  "scripts": {
+    "build:wasm": "cd wasm && cargo build --target wasm32-unknown-unknown --release && cp target/wasm32-unknown-unknown/release/tier2_kernel.wasm ../dist/",
+    "build:ts": "cd ts && npx tsc -p tsconfig.transformer.json && cp dist/tier2_transformer.js ../dist/",
+    "build": "npm run build:wasm && npm run build:ts",
+    "fixtures": ".venv/bin/python3 test/gen_parity_fixtures.py",
+    "test": "npm run build && node --test test/*.test.js",
+    "test:py": ".venv/bin/python3 -m unittest discover -s test -p 'test_*.py'"
+  }
+}
