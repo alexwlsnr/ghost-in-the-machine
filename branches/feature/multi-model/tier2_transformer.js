@@ -67,6 +67,18 @@ export function forward(api, sec, arch, tokens, base) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
     // Section pointer helper: actual address = base + manifest offset
     const S = (name) => base + sec[name].offset;
+    // Dispatch matmul to the right kernel based on the section's dtype.
+    // Biases are always fp32 and passed as a plain pointer.
+    const mw = (wName, bPtr, inp, out, inD, outD) => {
+        const s = sec[wName];
+        const wPtr = S(wName);
+        if (s.dtype === 'int8')
+            api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        else if (s.dtype === 'int4')
+            api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        else
+            api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
+    };
     let off = base;
     for (const s of Object.values(sec))
         off = Math.max(off, base + s.offset + s.size);
@@ -99,13 +111,13 @@ export function forward(api, sec, arch, tokens, base) {
                 lnBuf[j] = emb[p * d + j];
             api.layer_norm_f32(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`), d, 1e-5);
             const qp = qOff + p * d * 3 * 4;
-            api.matmul_f32w(S(`${pfx}_q_weight`), S(`${pfx}_q_bias`), lOff, qp, d, d);
-            api.matmul_f32w(S(`${pfx}_k_weight`), S(`${pfx}_k_bias`), lOff, qp + d * 4, d, d);
-            api.matmul_f32w(S(`${pfx}_v_weight`), S(`${pfx}_v_bias`), lOff, qp + d * 8, d, d);
+            mw(`${pfx}_q_weight`, S(`${pfx}_q_bias`), lOff, qp, d, d);
+            mw(`${pfx}_k_weight`, S(`${pfx}_k_bias`), lOff, qp + d * 4, d, d);
+            mw(`${pfx}_v_weight`, S(`${pfx}_v_bias`), lOff, qp + d * 8, d, d);
         }
         api.attention_f32(qOff, sOff, aOff, seq, d, nh);
         for (let p = 0; p < seq; p++) {
-            api.matmul_f32w(S(`${pfx}_o_weight`), S(`${pfx}_o_bias`), aOff + p * d * 4, tOff + p * d * 4, d, d);
+            mw(`${pfx}_o_weight`, S(`${pfx}_o_bias`), aOff + p * d * 4, tOff + p * d * 4, d, d);
         }
         api.add_vec_f32(eOff, tOff, seq * d);
         // FFN
@@ -115,14 +127,14 @@ export function forward(api, sec, arch, tokens, base) {
                 lnBuf[j] = emb[p * d + j];
             api.layer_norm_f32(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`), d, 1e-5);
             const up = tOff + p * arch.d_ff * 4;
-            api.matmul_f32w(S(`${pfx}_ff1_weight`), S(`${pfx}_ff1_bias`), lOff, up, d, arch.d_ff);
+            mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, up, d, arch.d_ff);
             api.relu_f32(up, arch.d_ff);
-            api.matmul_f32w(S(`${pfx}_ff2_weight`), S(`${pfx}_ff2_bias`), up, lOff, arch.d_ff, d);
+            mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), up, lOff, arch.d_ff, d);
             for (let j = 0; j < d; j++)
                 emb[p * d + j] += f32(lOff, d)[j];
         }
     }
-    // 3. Final LN + head
+    // 3. Final LN + head (head weight stays fp32 in mixed-precision)
     const lp = seq - 1;
     const lnBuf = f32(lOff, d);
     for (let j = 0; j < d; j++)
@@ -130,7 +142,7 @@ export function forward(api, sec, arch, tokens, base) {
     api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
     const zb = f32(oOff, arch.vocab_size);
     zb.fill(0);
-    const lgOff = oOff + arch.vocab_size * 4; // after bias buffer
+    const lgOff = oOff + arch.vocab_size * 4;
     api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
