@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { instantiateModel, generate } from '../dist/tier2_transformer.js';
+import { instantiateModel, generate, createCache } from '../dist/tier2_transformer.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -45,6 +45,15 @@ async function run(prompt, seed, temp = 1.0) {
   return out;
 }
 
+async function runWithCache(prompt, seed, temp = 1.0, cache) {
+  let out = '';
+  for await (const step of generate(model, prompt, 160, temp, lcg(seed), cache)) {
+    if (step.done) break;
+    out += step.char;
+  }
+  return out;
+}
+
 test('generate() is reproducible given a seeded RNG', async () => {
   // temp=2.0 — high enough that the (peaked) model's sampling genuinely varies,
   // so this only passes if generate() actually consumes the injected RNG.
@@ -66,5 +75,14 @@ const GOLDEN = [
 test('generate() reproduces the golden decoded outputs', async () => {
   for (const [prompt, expected] of GOLDEN) {
     assert.equal(await run(prompt, 777, 1.0), expected, `prompt: ${prompt}`);
+  }
+});
+
+test('KV cache produces identical output to full-recompute', async () => {
+  for (const [prompt] of GOLDEN) {
+    const withoutCache = await run(prompt, 777, 1.0);
+    const cache = createCache(model);
+    const withCache = await runWithCache(prompt, 777, 1.0, cache);
+    assert.equal(withCache, withoutCache, `KV cache mismatch for prompt: ${prompt}`);
   }
 });
