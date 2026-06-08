@@ -48,6 +48,49 @@ pub unsafe extern "C" fn matmul_4bit(
     }
 }
 
+// --- 4-bit per-group-scale matmul ---
+// Same nibble packing as matmul_4bit, but one scale per group_size weights
+// instead of one per tensor. Dramatically reduces quantization error on
+// layers with mixed-magnitude weights.
+
+#[no_mangle]
+pub unsafe extern "C" fn matmul_4bit_grouped(
+    weights: *const u8,
+    scales: *const f32,   // array of per-group scales, len = ceil(in_dim*out_dim / group_size)
+    biases: *const f32,
+    input: *const f32,
+    output: *mut f32,
+    in_dim: i32,
+    out_dim: i32,
+    group_size: i32,
+) {
+    let in_dim = in_dim as usize;
+    let out_dim = out_dim as usize;
+    let group_size = group_size as usize;
+    let total = in_dim * out_dim;
+    let n_groups = (total + group_size - 1) / group_size;
+    let packed_total = (total + 1) / 2;
+
+    let weight_bytes = core::slice::from_raw_parts(weights, packed_total);
+    let scales_slice = core::slice::from_raw_parts(scales, n_groups);
+    let bias_slice   = core::slice::from_raw_parts(biases, out_dim);
+    let input_slice  = core::slice::from_raw_parts(input, in_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    for o in 0..out_dim {
+        let mut sum = bias_slice[o];
+        for i in 0..in_dim {
+            let flat_idx = o * in_dim + i;
+            let byte = weight_bytes[flat_idx / 2];
+            let nibble = if flat_idx % 2 == 0 { (byte >> 4) & 0x0F } else { byte & 0x0F };
+            let scale = scales_slice[flat_idx / group_size];
+            let w = (nibble as i32 - 8) as f32 * scale;
+            sum += w * input_slice[i];
+        }
+        output_slice[o] = sum;
+    }
+}
+
 // --- 8-bit signed quantized matmul ---
 
 #[no_mangle]

@@ -65,6 +65,45 @@ def quantize_4bit(tensor: torch.Tensor) -> tuple[bytes, float]:
     return bytes(out), scale
 
 
+def quantize_4bit_grouped(
+    tensor: torch.Tensor,
+    group_size: int = 32,
+) -> tuple[bytes, list[float]]:
+    """Pack a float32 tensor into 4-bit ints with per-group scales.
+
+    Same nibble packing as quantize_4bit(), but one scale per group_size
+    values instead of one per tensor. Dramatically reduces quantization error
+    when weights span very different magnitudes (e.g. large FFN layers).
+
+    Returns (packed_bytes, scales_list) where len(scales_list) == ceil(n/group_size).
+    The scales list is stored as a separate float32 array in the manifest.
+    """
+    t = tensor.detach().cpu().to(torch.float32).numpy().ravel()
+    n = len(t)
+    n_groups = (n + group_size - 1) // group_size
+    out = bytearray()
+    scales: list[float] = []
+
+    for g in range(n_groups):
+        start = g * group_size
+        end = min(start + group_size, n)
+        chunk = t[start:end]
+
+        absmax = float(np.max(np.abs(chunk)))
+        if absmax < 1e-8:
+            absmax = 1.0
+        scale = absmax / 7.0
+        scales.append(scale)
+
+        quant = np.clip(np.round(chunk / scale), -8, 7).astype(np.int8)
+        for i in range(0, len(quant), 2):
+            hi = (int(quant[i]) + 8) & 0xF
+            lo = (int(quant[i + 1]) + 8) & 0xF if i + 1 < len(quant) else 0
+            out.append((hi << 4) | lo)
+
+    return bytes(out), scales
+
+
 def quantize_bf16(tensor: torch.Tensor) -> bytes:
     """Store a float32 tensor as bfloat16 (top 16 bits of each f32 bit pattern).
 
@@ -118,22 +157,26 @@ def serialize(
     sections: dict[str, dict[str, Any]] = {}
     buf = bytearray()
 
+    GROUP_SIZE = 32  # weights per scale group for int4 grouped quantization
+
     def add(name: str, tensor: torch.Tensor, *, quantize: bool = False):
         t = tensor.detach().cpu().to(torch.float32)
 
         if quantize and weight_bits == 4:
-            raw, scale = quantize_4bit(t)
-            dtype = "int4"
+            raw, scales = quantize_4bit_grouped(t, group_size=GROUP_SIZE)
+            scales_raw = np.array(scales, dtype=np.float32).tobytes()
+            dtype = "int4g"
         elif quantize and weight_bits == 8:
             raw, scale = quantize_8bit(t)
+            scales_raw = None
             dtype = "int8"
         elif quantize and weight_bits == 16:
             raw = quantize_bf16(t)
-            scale = None
+            scales_raw = None
             dtype = "bfloat16"
         else:
             raw = t.numpy().tobytes()
-            scale = None
+            scales_raw = None
             dtype = "float32"
 
         entry: dict[str, Any] = {
@@ -142,10 +185,17 @@ def serialize(
             "shape":  list(t.shape),
             "dtype":  dtype,
         }
-        if scale is not None:
+        if dtype == "int4g":
+            # Store per-group scales as a separate contiguous block after the nibbles
+            entry["scales_offset"] = len(buf) + len(raw)
+            entry["scales_size"]   = len(scales_raw)
+            entry["group_size"]    = GROUP_SIZE
+        elif dtype == "int8":
             entry["scale"] = scale
         sections[name] = entry
         buf.extend(raw)
+        if scales_raw is not None:
+            buf.extend(scales_raw)
 
     add("token_embed", state["token_embed.weight"] * sqrt_d)
     add("pos_embed",   state["pos_embed.weight"])

@@ -398,6 +398,97 @@ test('matmul_bf16: zero input yields the bias', () => {
   assertClose(getF32(O.ptr, outDim), b, 'matmul_bf16-bias', 1e-6, 1e-6);
 });
 
+// ── Per-group 4-bit matmul ────────────────────────────────────────────────────
+
+function pack4bitGrouped(weights, groupSize) {
+  const total = weights.length;
+  const nGroups = Math.ceil(total / groupSize);
+  const scales = [];
+  for (let g = 0; g < nGroups; g++) {
+    const start = g * groupSize, end = Math.min(start + groupSize, total);
+    const chunk = weights.slice(start, end);
+    const absmax = Math.max(...chunk.map(Math.abs));
+    scales.push((absmax < 1e-8 ? 1.0 : absmax) / 7.0);
+  }
+  const packed = new Uint8Array(Math.ceil(total / 2));
+  for (let i = 0; i < total; i += 2) {
+    const g = Math.floor(i / groupSize);
+    const hi = (Math.max(-8, Math.min(7, Math.round(weights[i] / scales[g]))) + 8) & 0xF;
+    const lo = i + 1 < total
+      ? (Math.max(-8, Math.min(7, Math.round(weights[i+1] / scales[Math.floor((i+1)/groupSize)]))) + 8) & 0xF
+      : 0;
+    packed[i >> 1] = (hi << 4) | lo;
+  }
+  return { packed, scales };
+}
+
+function refMatmul4bitGrouped(packed, scales, groupSize, b, inp, inDim, outDim) {
+  const out = new Array(outDim);
+  for (let o = 0; o < outDim; o++) {
+    let sum = b[o];
+    for (let i = 0; i < inDim; i++) {
+      const flatIdx = o * inDim + i;
+      const byte = packed[flatIdx >> 1];
+      const nibble = flatIdx % 2 === 0 ? (byte >> 4) & 0xF : byte & 0xF;
+      const scale = scales[Math.floor(flatIdx / groupSize)];
+      sum += (nibble - 8) * scale * inp[i];
+    }
+    out[o] = sum;
+  }
+  return out;
+}
+
+test('matmul_4bit_grouped: correctness vs JS reference (group_size=4)', () => {
+  const inDim = 8, outDim = 4, groupSize = 4;
+  // Weights with two very different magnitude ranges — worst case for per-tensor
+  const weights = seqVals(inDim * outDim, 77).map((v, i) => v * (i < 16 ? 10.0 : 0.01));
+  const { packed, scales } = pack4bitGrouped(weights, groupSize);
+  const b = seqVals(outDim, 13);
+  const inp = seqVals(inDim, 21);
+  let p = reset();
+  const W  = putU8(p, packed);
+  const S  = putF32(W.next, scales);
+  const B  = putF32(S.next, b);
+  const I  = putF32(B.next, inp);
+  const O  = putF32(I.next, new Array(outDim).fill(0));
+  api.matmul_4bit_grouped(W.ptr, S.ptr, B.ptr, I.ptr, O.ptr, inDim, outDim, groupSize);
+  const expected = refMatmul4bitGrouped(packed, scales, groupSize, b, inp, inDim, outDim);
+  assertClose(getF32(O.ptr, outDim), expected, 'matmul_4bit_grouped', 1e-3, 1e-3);
+});
+
+test('matmul_4bit_grouped: small weights preserved where per-tensor rounds them to zero', () => {
+  // Input selectively activates only the small-magnitude region.
+  // Per-tensor scale = 100/7 ≈ 14.3 → small weights (0.1) quantize to 0.
+  // Per-group scale for small region = 0.1/7 ≈ 0.014 → they survive.
+  const inDim = 16, outDim = 1, groupSize = 8;
+  // weights: first 8 all +100 (large), last 8 all +0.1 (small)
+  const weights = [...new Array(8).fill(100.0), ...new Array(8).fill(0.1)];
+  // Input: zero for large region, one for small region → only small weights matter
+  const inp = [...new Array(8).fill(0.0), ...new Array(8).fill(1.0)];
+  const ref = weights.reduce((s, w, i) => s + w * inp[i], 0); // ≈ 0.8
+
+  const { packed, scales } = pack4bitGrouped(weights, groupSize);
+  const scalePT = Math.max(...weights.map(Math.abs)) / 7.0;
+  const packedPT = pack4bit(weights, scalePT);
+  const b = [0];
+  let p = reset();
+  const WG = putU8(p, packed);
+  const SG = putF32(WG.next, scales);
+  const BG = putF32(SG.next, b);
+  const IG = putF32(BG.next, inp);
+  const OG = putF32(IG.next, [0]);
+  const WP = putU8(OG.next, packedPT);
+  const BP = putF32(WP.next, b);
+  const IP = putF32(BP.next, inp);
+  const OP = putF32(IP.next, [0]);
+  api.matmul_4bit_grouped(WG.ptr, SG.ptr, BG.ptr, IG.ptr, OG.ptr, inDim, 1, groupSize);
+  api.matmul_4bit(WP.ptr, scalePT, BP.ptr, IP.ptr, OP.ptr, inDim, 1);
+  const errGrouped   = Math.abs(getF32(OG.ptr, 1)[0] - ref);
+  const errPerTensor = Math.abs(getF32(OP.ptr, 1)[0] - ref);
+  assert.ok(errGrouped < errPerTensor,
+    `grouped err ${errGrouped.toFixed(4)} should be < per-tensor err ${errPerTensor.toFixed(4)}`);
+});
+
 // ── SIMD matmul ──────────────────────────────────────────────────────────────
 // matmul_f32w_simd must produce bit-identical results to matmul_f32w.
 // Tests load the SIMD build directly; skipped if the file doesn't exist.
