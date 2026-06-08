@@ -1,0 +1,20 @@
+what does ls -la do?|Lists all files in long format including hidden files
+how do I find files by name?|find . -name "filename"
+what does chmod 755 do?|Sets owner rwx, group and others r-x permissions
+how do I search for text in files recursively?|grep -r "pattern" /path/to/dir
+what does ps aux show?|Shows all running processes with user, CPU, and memory usage
+how do I check disk usage?|df -h
+how do I kill a process by name?|pkill processname
+what does tar -xzf do?|Extracts a gzip-compressed tar archive
+how do I show the last 20 lines of a file?|tail -n 20 filename
+what does chmod 644 do?|Sets owner rw, group and others read-only permissions
+how do I count lines in a file?|wc -l filename
+what does rsync -av do?|Syncs files verbosely preserving attributes
+how do I redirect stderr to a file?|command 2> error.log
+what does top show?|Real-time view of system processes, CPU, and memory usage
+how do I create a directory and its parents?|mkdir -p path/to/dir
+what does diff do?|Shows line-by-line differences between two files
+how do I check which port a process is using?|ss -tulnp
+what does env do?|Displays or sets environment variables
+how do I show file permissions in octal?|stat -c "%a %n" filename
+what does awk '{print $1}' do?|Prints the first field of each line
