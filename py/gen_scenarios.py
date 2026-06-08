@@ -17,6 +17,7 @@ import argparse
 import itertools
 import os
 import random
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
@@ -109,11 +110,64 @@ Rules:
 - Output ONLY the QUERY|RESPONSE line — no preamble, no explanation
 """
 
+SYSTEM_PROMPT_MULTI = """\
+You are generating multi-turn training dialogues for a tiny byte-level AI assistant called GHOST.
+Output EXACTLY {n} lines, alternating between the human and GHOST:
+  Q1: <human turn>
+  A1: <GHOST reply>
+  Q2: <human follow-up>
+  A2: <GHOST reply>
+  ... and so on
+
+Rules:
+- ALL CAPS throughout
+- Each line under 80 characters
+- No character names — GHOST calls the user HUMAN if needed
+- The conversation should flow naturally — each turn builds on the last
+- GHOST sounds warm, slightly quirky, and genuinely helpful
+- Output ONLY the labelled lines above — no preamble, no explanation
+"""
+
 
 # ── Core functions ────────────────────────────────────────────────────────────
 
 def build_scenario_prompt(description: str) -> str:
     return f"Generate a QUERY|RESPONSE pair where {description}."
+
+
+def build_multiturn_prompt(description: str, n_turns: int) -> str:
+    return f"Generate a {n_turns}-turn dialogue where {description}."
+
+
+def parse_dialogue_response(raw: str, n_turns: int) -> Optional[list[str]]:
+    """Parse a multi-turn teacher response into a flat list of turns.
+
+    Expects lines like 'Q1: ...', 'A1: ...', 'Q2: ...', 'A2: ...'
+    Returns a flat list [q1, a1, q2, a2, ...] or None if malformed.
+    """
+    turns = []
+    for line in raw.splitlines():
+        line = line.strip()
+        # Match Q1:/A1:/Q:/A: prefixes
+        m = re.match(r'^[QA]\d*\s*:\s*(.+)', line, re.IGNORECASE)
+        if m:
+            text = m.group(1).strip().strip('"\'').upper()
+            text = re.sub(r'\s+', ' ', text)
+            if 3 <= len(text) <= 120 and '|' not in text:
+                try:
+                    text.encode('ascii')
+                    turns.append(text)
+                except UnicodeEncodeError:
+                    pass
+    if len(turns) < 2:
+        return None
+    # Trim to even length and cap at 2*n_turns
+    turns = turns[:n_turns * 2]
+    if len(turns) % 2 != 0:
+        turns = turns[:-1]
+    if len(turns) < 2:
+        return None
+    return turns
 
 
 def parse_pair_line(line: str) -> Optional[tuple[str, str]]:
@@ -181,12 +235,43 @@ def generate_pair(
     return q, r, scenario["stratum"]
 
 
+def generate_dialogue(
+    endpoint: str,
+    model: str,
+    scenario: dict,
+    n_turns: int,
+    max_ctx: int = 1024,
+) -> Optional[tuple[list[str], str]]:
+    """Ask the teacher for a multi-turn dialogue. Returns ([turns], stratum) or None."""
+    system = SYSTEM_PROMPT_MULTI.format(n=n_turns)
+    prompt = build_multiturn_prompt(scenario["desc"], n_turns)
+    msgs = [{"role": "user", "content": prompt}]
+    try:
+        raw = chat_completion(endpoint, model, msgs, system=system,
+                              max_tokens=n_turns * 60, temperature=0.9)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    turns = parse_dialogue_response(raw, n_turns)
+    if not turns:
+        return None
+    # Check total fits in ctx budget
+    total = sum(len(t) for t in turns) + len(turns) + 1
+    if total > max_ctx:
+        return None
+    return turns, scenario["stratum"]
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Scenario-seeded dialogue generator")
     parser.add_argument("--output", "-o", default="data/scenarios.txt")
-    parser.add_argument("--pairs", "-n", type=int, default=5000)
+    parser.add_argument("--pairs", "-n", type=int, default=5000,
+                        help="Target number of dialogues (single-turn) or multi-turn exchanges")
+    parser.add_argument("--turns", type=int, default=1,
+                        help="Turns per dialogue: 1=single Q|R, 2-4=multi-turn Q1|R1|Q2|R2|...")
     parser.add_argument("--workers", "-w", type=int, default=16)
     parser.add_argument("--endpoint", "-e", default="http://localhost:8080/v1")
     parser.add_argument("--model", "-m", default="gemma4-e4b-distill")
@@ -194,45 +279,62 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
+    multi_turn = args.turns > 1
     rng = random.Random(args.seed)
     scenario_pool = list(itertools.islice(
-        itertools.cycle(SCENARIOS), args.pairs * 3
+        itertools.cycle(SCENARIOS), args.pairs * 4
     ))
     rng.shuffle(scenario_pool)
 
-    results: list[tuple[str, str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    results = []   # list of (turns_list, stratum) for multi, or (q, r, stratum) for single
+    seen: set = set()
     done = 0
 
+    mode = f"{args.turns}-turn" if multi_turn else "single-turn"
     os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
-    print(f"Generating up to {args.pairs} pairs via {args.workers} workers...")
+    print(f"Generating up to {args.pairs} {mode} dialogues via {args.workers} workers...")
 
     with open(args.output, "w") as out_f:
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
-            futs = {ex.submit(generate_pair, args.endpoint, args.model, s, args.max_ctx): s
-                    for s in scenario_pool}
+            if multi_turn:
+                futs = {ex.submit(generate_dialogue, args.endpoint, args.model, s,
+                                  args.turns, args.max_ctx): s for s in scenario_pool}
+            else:
+                futs = {ex.submit(generate_pair, args.endpoint, args.model, s,
+                                  args.max_ctx): s for s in scenario_pool}
             for fut in as_completed(futs):
                 done += 1
                 res = fut.result()
                 if res:
-                    q, r, stratum = res
-                    if (q, r) not in seen:
-                        seen.add((q, r))
-                        results.append((q, r, stratum))
-                        out_f.write(f"{q}|{r}\n")
-                        out_f.flush()
+                    if multi_turn:
+                        turns, stratum = res
+                        key = tuple(turns)
+                        if key not in seen:
+                            seen.add(key)
+                            results.append((turns, stratum))
+                            out_f.write('|'.join(turns) + '\n')
+                            out_f.flush()
+                    else:
+                        q, r, stratum = res
+                        if (q, r) not in seen:
+                            seen.add((q, r))
+                            results.append((q, r, stratum))
+                            out_f.write(f"{q}|{r}\n")
+                            out_f.flush()
                 if done % 100 == 0:
                     print(f"  {done}/{len(scenario_pool)} attempts, {len(results)} valid", flush=True)
                 if len(results) >= args.pairs:
                     break
 
     from collections import Counter
-    counts = Counter(s for _, _, s in results)
+    if multi_turn:
+        counts = Counter(s for _, s in results)
+    else:
+        counts = Counter(s for _, _, s in results)
     print(f"\nStratum breakdown:")
     for s, n in sorted(counts.items(), key=lambda x: -x[1]):
         print(f"  {s:12s}: {n}")
-    print(f"\nTotal: {len(results)} pairs")
-
+    print(f"\nTotal: {len(results)} {mode} dialogues")
     print(f"Written → {args.output}")
 
 
