@@ -94,9 +94,9 @@ class TrainLoopKnobs(unittest.TestCase):
             n = {"v": 0}
             real = model.compute_quantization_loss
 
-            def counting(real=real, n=n):
+            def counting(weight_bits=4, real=real, n=n):
                 n["v"] += 1
-                return real()
+                return real(weight_bits)
 
             model.compute_quantization_loss = counting
             with tempfile.TemporaryDirectory() as d:

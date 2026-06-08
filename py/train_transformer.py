@@ -95,16 +95,24 @@ class TinyTransformer(nn.Module):
         h = self.ln_final(h)
         return self.head(h)
 
-    def compute_quantization_loss(self) -> torch.Tensor:
-        """Encourage weights to stay near quantization levels."""
+    def compute_quantization_loss(self, weight_bits: int = 4) -> torch.Tensor:
+        """Push weights toward the actual quantization grid used at inference.
+
+        Uses the same scale as serialize.py (absmax / max_int) so QAT targets
+        the same 16 levels (4-bit) or 256 levels (8-bit) used at inference.
+        The old formula (95th-percentile scale, round to nearest 1) was
+        accidentally ternary-like and misaligned with the serializer.
+        """
+        max_int = float(2 ** (weight_bits - 1) - 1)  # 7.0 for 4-bit, 127.0 for 8-bit
         loss = torch.tensor(0.0, device=next(self.parameters()).device)
         for p in self.parameters():
             if p.dim() <= 1:
                 continue
-            p_flat = p.flatten()
-            scale = torch.quantile(p_flat.abs(), 0.95).clamp(min=1e-6)
-            p_scaled = p_flat / scale
-            loss = loss + F.mse_loss(p_scaled, torch.round(p_scaled))
+            with torch.no_grad():
+                absmax = p.abs().max().clamp(min=1e-8)
+                scale = absmax / max_int
+                target = torch.clamp(torch.round(p / scale), -max_int - 1, max_int)
+            loss = loss + F.mse_loss(p / scale, target)
         return loss
 
     def get_quantized_params(self, weight_bits: int = 4) -> dict:
@@ -256,6 +264,7 @@ def train_transformer(
     amp: bool = False,
     qat_every: int = 1,
     qat_weight: float = 0.10,
+    qat_bits: int = 4,
     val_frac: float = 0.0,
     patience: int = 0,
     status_file: Optional[str] = None,
@@ -348,7 +357,7 @@ def train_transformer(
             # Quantization-aware penalty is expensive (per-tensor quantile), so
             # apply it only every `qat_every` steps. qat_every<=0 disables it.
             if qat_every > 0 and step % qat_every == 0:
-                total = loss + model.compute_quantization_loss() * qat_weight
+                total = loss + model.compute_quantization_loss(qat_bits) * qat_weight
             else:
                 total = loss
             total.backward()
@@ -527,6 +536,8 @@ if __name__ == '__main__':
     parser.add_argument('--qat-every', type=int, default=1,
                         help='apply the quantization penalty every N steps (0=off)')
     parser.add_argument('--qat-weight', type=float, default=0.10)
+    parser.add_argument('--qat-bits', type=int, default=4, choices=[4, 8],
+                        help='target bit-width for QAT loss (4 or 8)')
     parser.add_argument('--val-frac', type=float, default=0.0,
                         help='fraction of pairs held out for validation (e.g. 0.05)')
     parser.add_argument('--patience', type=int, default=0,
@@ -586,7 +597,7 @@ if __name__ == '__main__':
         model, pairs, epochs=remaining, lr=args.lr,
         device=device, checkpoint_file=args.checkpoint,
         batch_size=args.batch_size, amp=args.amp,
-        qat_every=args.qat_every, qat_weight=args.qat_weight,
+        qat_every=args.qat_every, qat_weight=args.qat_weight, qat_bits=args.qat_bits,
         val_frac=args.val_frac, patience=args.patience,
         status_file=args.status_file,
         preserve_case=args.preserve_case,
