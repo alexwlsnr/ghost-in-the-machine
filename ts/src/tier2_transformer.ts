@@ -104,13 +104,16 @@ export function encode(text: string): number[] {
 // Biases are always fp32. Head weight stays fp32 (mixed-precision layout).
 function makeMatmulDispatch(api: WasmApi, sec: Record<string, SectionDef>, base: number) {
   const S = (name: string) => base + sec[name].offset;
+  // Use SIMD matmul for fp32 if the SIMD kernel was loaded (it exports matmul_f32w_simd).
+  // Falls back transparently to the scalar matmul_f32w on non-SIMD builds.
+  const fp32mw = (api as any).matmul_f32w_simd ?? api.matmul_f32w;
   return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
     const s = sec[wName];
     const wPtr = S(wName);
-    if (s.dtype === 'int8')        api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-    else if (s.dtype === 'int4')   api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    if (s.dtype === 'int8')          api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    else if (s.dtype === 'int4')     api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'bfloat16') api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
-    else                           api.matmul_f32w(wPtr, bPtr, inp, out, inD, outD);
+    else                             fp32mw(wPtr, bPtr, inp, out, inD, outD);
   };
 }
 
