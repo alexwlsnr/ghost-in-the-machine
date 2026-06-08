@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # ─── Defaults (override with env vars or flags) ───────────────────────────────
-DATA="data/shade_train.txt"
+DATA="data/training_pairs.txt"
 CKPT="ckpt/shade_fp32.pt"
 STATUS="logs/shade_status.json"
 LOG="logs/shade_train.log"
