@@ -65,14 +65,14 @@
     {
       "id": "shade-4bit",
       "name": "Shade 4-bit",
-      "description": "10.9M params · 6MB · degraded quality",
+      "description": "10.9M params · 6MB · grouped quant",
       "bin": "model_shade_4bit.bin",
       "json": "model_shade_4bit.json",
       "size_mb": 6,
       "params": "10.9M",
       "ctx": 128,
       "default": false,
-      "available": false
+      "available": true
     },
     {
       "id": "spec512",
