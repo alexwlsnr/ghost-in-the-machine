@@ -753,6 +753,7 @@ def train_transformer(
                 'model_state': model.state_dict(),
                 'architecture': {
                     'type': 'tiny_transformer',
+                    'arch': 'modern' if isinstance(model, TinyTransformerModern) else 'classic',
                     'vocab_size': model.vocab_size,
                     'd_model': model.d_model,
                     'n_heads': model.n_heads,
