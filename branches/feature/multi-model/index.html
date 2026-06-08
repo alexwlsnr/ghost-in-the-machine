@@ -223,21 +223,6 @@
     text-transform: none;
   }
 
-  #cursor {
-    display: inline-block;
-    width: 12px;
-    height: 26px;
-    background: #33ff33;
-    animation: blink 1s step-end infinite;
-    vertical-align: middle;
-    margin-left: 2px;
-  }
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
-  }
-
   @keyframes pulse {
     0%, 100% { opacity: 0.3; }
     50% { opacity: 1; }
@@ -320,7 +305,6 @@
   <div id="input-line">
     <span id="prompt-marker">></span>
     <input id="query-input" type="text" placeholder="TYPE YOUR QUERY..." autofocus disabled>
-    <span id="cursor"></span>
     <div id="temp-group">
       <span id="temp-label">TEMP</span>
       <button id="temp-down" class="temp-btn">◂</button>
@@ -711,6 +695,18 @@ input.addEventListener('keydown', async (e) => {
   perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)`;
 
   setInputEnabled(true);
+});
+
+// ── Global key capture — route printable keys to the input ───────────────
+// Skips when: input is disabled, input already has focus, a button has focus,
+// or a modifier key is held (so Ctrl+C on terminal selection still works).
+document.addEventListener('keydown', (e) => {
+  if (input.disabled) return;
+  if (document.activeElement === input) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.length !== 1) return;                 // arrow keys, Tab, Enter, etc.
+  if (document.activeElement?.tagName === 'BUTTON') return;
+  input.focus();
 });
 
 boot();
