@@ -194,22 +194,32 @@ def decode(tokens: List[int]) -> str:
     return bytes(b for b in tokens if b < 256).decode('ascii', errors='replace')
 
 
-def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN) -> Tuple[List[int], List[int]]:
+def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
+                  truncate: bool = False) -> Tuple[List[int], List[int]]:
     """Create input/target pair for autoregressive training.
 
     Layout: [Q bytes] [SEP] [R bytes] [EOS]
 
     SEP (byte 1) separates query from response so the model learns a clean
-    response zone. Pairs that would need truncation are signalled by returning
-    an input shorter than 4 bytes — _build_sequences drops them so EOS always
-    lands at a natural sentence end, never mid-truncation.
+    response zone.
+
+    truncate=False (default): pairs that exceed max_len return [] — caller
+      drops them so EOS always lands at a natural sentence end. Correct when
+      enough short pairs exist (Shade/Specter where ctx is large).
+
+    truncate=True: over-long pairs truncate R to fit rather than being dropped.
+      EOS lands mid-sentence but SEP still teaches clean zone boundaries,
+      preventing the doubled-response issue. Use for Wisp (ctx=64) where
+      strict filtering would discard 97% of diverse training data.
     """
     q_bytes = encode(query)
     r_bytes = encode(response)
 
     full = q_bytes + [SEP_TOKEN] + r_bytes
-    if len(full) + 1 > max_len:  # +1 for EOS — would need to truncate, signal caller
-        return [], []
+    if len(full) + 1 > max_len:
+        if not truncate:
+            return [], []          # signal caller to drop
+        full = full[:max_len - 1]  # truncate R, EOS will follow
 
     # Input: Q + SEP + R + EOS
     inp = full + [EOS_TOKEN]
@@ -239,7 +249,7 @@ def split_pairs(pairs, val_frac: float, seed: int = 0):
     return train, val
 
 
-def _build_sequences(pairs, max_len: int, preserve_case: bool = False):
+def _build_sequences(pairs, max_len: int, preserve_case: bool = False, truncate: bool = False):
     """Tokenize pairs into (inputs, targets), dropping empty / too-short ones."""
     inputs, targets = [], []
     for q, r in pairs:
@@ -247,9 +257,8 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False):
             continue
         q_norm = q.strip() if preserve_case else q.upper().strip()
         r_norm = r.strip() if preserve_case else r.upper().strip()
-        inp, tgt = make_sequence(q_norm, r_norm, max_len)
-        # make_sequence returns [] when the pair needs truncation (Fix B).
-        # Only include pairs that fit fully — EOS always at a sentence end.
+        inp, tgt = make_sequence(q_norm, r_norm, max_len, truncate=truncate)
+        # make_sequence returns [] when truncate=False and pair is over-length.
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -279,6 +288,7 @@ def train_transformer(
     patience: int = 0,
     status_file: Optional[str] = None,
     preserve_case: bool = False,
+    truncate: bool = False,
 ):
     """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
     # Lazy-import supervision emitter — no hard dep when not used.
@@ -304,8 +314,8 @@ def train_transformer(
     model.train()
 
     train_pairs, val_pairs = split_pairs(pairs, val_frac)
-    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case)
-    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case)
+    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate)
+    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate)
 
     print(f"Sequences — train: {len(all_inputs)}, val: {len(val_inputs)}")
     total_params = sum(p.numel() for p in model.parameters())
@@ -563,6 +573,8 @@ if __name__ == '__main__':
                         help='path to write status.json each epoch (supervision harness)')
     parser.add_argument('--preserve-case', action='store_true',
                         help='disable uppercase normalization (required for Wraith/technical models)')
+    parser.add_argument('--truncate', action='store_true',
+                        help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -618,6 +630,7 @@ if __name__ == '__main__':
         val_frac=args.val_frac, patience=args.patience,
         status_file=args.status_file,
         preserve_case=args.preserve_case,
+        truncate=args.truncate,
     )
     model = result['model']
 

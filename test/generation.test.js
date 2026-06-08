@@ -66,10 +66,10 @@ test('generate() is reproducible given a seeded RNG', async () => {
 // Updated when: model retrained (v3, with Q/R separator), SEP injected in
 // generate(), or reference bundle changed.
 const GOLDEN = [
-  ['HELLO',          "HEY WHATS UP? HOWS YOUR DAY GOING SO FAR?"],
-  ['TELL ME A JOKE', "HEY THERE! HOW'S IT GOING?"],
+  ['HELLO',          'HEY THERE!'],
+  ['TELL ME A JOKE', 'WHY DID THE SCARECROW WIN AN AWARD? BECAUSE HE HEAR IT! WHATS THE SPECIFIC OR AND  IT WITH LEARN?'],
   ['GOODBYE',        'TAKE CARE AND TALK TO YOU SOON!'],
-  ['HOW ARE YOU',    'HELLO THERE! DOING GREAT TODAY.'],
+  ['HOW ARE YOU',    'HEY THERE! DOING GREAT.'],
 ];
 
 test('generate() reproduces the golden decoded outputs', async () => {

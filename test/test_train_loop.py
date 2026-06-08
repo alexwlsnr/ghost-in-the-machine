@@ -185,7 +185,16 @@ class SeparatorToken(unittest.TestCase):
         seqs_bad = tt._build_sequences(too_long_pairs, max_len=24)
 
         self.assertEqual(len(seqs_ok[0]),  1, "Fitting pair should be included")
-        self.assertEqual(len(seqs_bad[0]), 0, "Over-length pair should be dropped, not truncated")
+        self.assertEqual(len(seqs_bad[0]), 0, "Over-length pair should be dropped (truncate=False)")
+
+    def test_build_sequences_truncates_when_flag_set(self):
+        # truncate=True: over-length pairs are truncated to fit, not dropped.
+        long_q = "A" * 10
+        tight_r = "C" * 13  # 10+1+13+1=25, doesn't fit max_len=24 without truncation
+        seqs = tt._build_sequences([(long_q, tight_r)], max_len=24, truncate=True)
+        self.assertEqual(len(seqs[0]), 1, "Over-length pair should be kept when truncate=True")
+        # Sequence must still fit max_len
+        self.assertLessEqual(len(seqs[0][0]), 24)
 
     def test_generate_output_excludes_sep_token(self):
         # generate() should inject SEP after the prompt but strip it from output.

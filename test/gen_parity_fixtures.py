@@ -21,7 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "py"))
 from train_transformer import TinyTransformer, encode  # noqa: E402
 
-CHECKPOINT = os.path.join(ROOT, "ckpt", "wisp_v3.pt")  # v3: SEP-trained
+CHECKPOINT = os.path.join(ROOT, "ckpt", "wisp_ctx128.pt")  # ctx=128 model
 OUT = os.path.join(ROOT, "test", "fixtures", "parity_logits.json")
 
 # Fixed prompts spanning a few lengths. Kept short so the sequence stays well
