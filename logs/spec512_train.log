@@ -1,0 +1,36 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+Loaded 30307 training items (20545 multi-turn)
+Device: cuda
+Training on 30307 pairs, 200 epochs
+Sequences — train: 28792, val: 1515
+Parameters: 26,008,576
+Mixed precision: bf16 autocast enabled
+  Epoch    5/200: loss=0.8536, acc=0.728, val_loss=0.7903
+  Epoch   10/200: loss=0.7331, acc=0.763, val_loss=0.7028
+  Epoch   15/200: loss=0.6764, acc=0.780, val_loss=0.6700
+  Epoch   20/200: loss=0.6387, acc=0.792, val_loss=0.6525
+  Epoch   25/200: loss=0.6106, acc=0.800, val_loss=0.6403
+  Epoch   30/200: loss=0.5883, acc=0.807, val_loss=0.6324
+  Epoch   35/200: loss=0.5686, acc=0.812, val_loss=0.6258
+  Epoch   40/200: loss=0.5524, acc=0.817, val_loss=0.6268
+  Epoch   45/200: loss=0.5386, acc=0.821, val_loss=0.6227
+  Epoch   50/200: loss=0.5258, acc=0.825, val_loss=0.6268
+  Epoch   55/200: loss=0.5143, acc=0.828, val_loss=0.6249
+  Epoch   60/200: loss=0.5032, acc=0.832, val_loss=0.6218
+  Epoch   65/200: loss=0.4938, acc=0.835, val_loss=0.6257
+  Epoch   70/200: loss=0.4839, acc=0.838, val_loss=0.6263
+  Epoch   75/200: loss=0.4752, acc=0.840, val_loss=0.6322
+  Epoch   80/200: loss=0.4666, acc=0.843, val_loss=0.6360
+  Epoch   85/200: loss=0.4593, acc=0.845, val_loss=0.6398
+
+Early stop at epoch 87 (no val improvement for 30 epochs)
+
+Best acc: 0.830 at epoch 57
+
+Sample generations:
+  HELLO                → HELLO HUMAN, I AM GHOST, AND I AM READY TO CHAT!
+  HOW ARE YOU          → HELLO HUMAN! I AM FEELING QUITE SPARKLY AND READY 
+  TELL ME A JOKE       → WHY DID THE BONE GO TO THE PARTY? BECAUSE THEY WER
+  WHO ARE YOU          → I'M GHOST, HUMAN! A LITTLE BYTE-SIZED EAGER AND RE
+  THANKS               → NO PROBLEM. I KNOW HOW MUCH YOU LOVE HER COMPLETEL

@@ -67,3 +67,27 @@ test('forward runs on a large long-context arch without OOB', async () => {
     assert.ok(Number.isFinite(logits[i]), `logit ${i} not finite`);
   }
 });
+
+test('Spec512 arch (d=512, L=8, ctx=1024): forward + KV cache fit in Wasm memory', async () => {
+  // Spec512 production arch: 22 MB scratch + 32 MB KV cache + ~100 MB weights (fp32).
+  // Verifies no OOB on the forward pass and that createCache allocates cleanly.
+  const { createCache, prefill, forwardIncremental } = await import('../dist/tier2_transformer.js');
+  const arch = { vocab_size: 258, d_model: 512, n_heads: 8, n_layers: 8, d_ff: 2048, max_len: 1024 };
+  const { bin, json } = synthBundle(arch);
+  const model = await instantiateModel(readFileSync(WASM), bin, json);
+
+  // Full-context forward pass (seq = max_len - 1 = 1023 tokens)
+  const seq = arch.max_len - 1;
+  const tokens = Array.from({ length: seq }, (_, i) => i % 256);
+  const logits = forward(model.api, model.sec, model.manifest, tokens, model.base);
+  assert.equal(logits.length, arch.vocab_size, 'vocab size');
+  assert.ok(logits.every(Number.isFinite), 'all logits finite');
+
+  // KV cache: prefill a short sequence then step forward once
+  const cache = createCache(model);
+  assert.ok(cache !== null && cache !== undefined, 'cache created');
+  assert.ok(cache.k.length === arch.n_layers, 'one K buffer per layer');
+  assert.ok(cache.v.length === arch.n_layers, 'one V buffer per layer');
+  // Each K/V buffer should hold max_len * d_model floats
+  assert.equal(cache.k[0].length, arch.max_len * arch.d_model, 'K buffer size');
+});

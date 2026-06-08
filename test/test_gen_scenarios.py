@@ -80,5 +80,59 @@ class BuildPrompt(unittest.TestCase):
         self.assertIn("feelings", prompt)
 
 
+class ParseDialogueResponse(unittest.TestCase):
+
+    def test_basic_two_turn(self):
+        raw = "Q1: HELLO HUMAN\nA1: HEY THERE! HOW CAN I HELP?"
+        result = gs.parse_dialogue_response(raw, n_turns=1)
+        self.assertIsNotNone(result)
+        self.assertEqual(result, ["HELLO HUMAN", "HEY THERE! HOW CAN I HELP?"])
+
+    def test_four_turn(self):
+        raw = (
+            "Q1: HOW ARE YOU?\n"
+            "A1: DOING GREAT HUMAN!\n"
+            "Q2: TELL ME A JOKE\n"
+            "A2: WHY DID THE CHICKEN CROSS THE ROAD?"
+        )
+        result = gs.parse_dialogue_response(raw, n_turns=2)
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result), 4)
+
+    def test_caps_at_n_turns(self):
+        raw = (
+            "Q1: HI\nA1: HELLO!\n"
+            "Q2: HOW ARE YOU\nA2: GREAT!\n"
+            "Q3: TELL ME A JOKE\nA3: WHY DID THE CHICKEN..."
+        )
+        result = gs.parse_dialogue_response(raw, n_turns=2)
+        self.assertIsNotNone(result)
+        self.assertLessEqual(len(result), 4)
+
+    def test_too_few_turns_returns_none(self):
+        result = gs.parse_dialogue_response("Q1: HI", n_turns=1)
+        self.assertIsNone(result)
+
+    def test_filters_pipe_in_turn(self):
+        raw = "Q1: HELLO|THERE\nA1: HEY HUMAN!"
+        result = gs.parse_dialogue_response(raw, n_turns=1)
+        # Either None (both invalid) or only valid turns included
+        if result is not None:
+            for t in result:
+                self.assertNotIn("|", t)
+
+    def test_uppercase_output(self):
+        raw = "Q1: hello there\nA1: hey human how are you"
+        result = gs.parse_dialogue_response(raw, n_turns=1)
+        self.assertIsNotNone(result)
+        for t in result:
+            self.assertEqual(t, t.upper())
+
+    def test_build_multiturn_prompt(self):
+        prompt = gs.build_multiturn_prompt("a user and GHOST discuss emotions", n_turns=3)
+        self.assertIn("3", prompt)
+        self.assertIn("emotions", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

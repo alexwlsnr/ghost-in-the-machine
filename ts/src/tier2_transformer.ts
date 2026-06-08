@@ -375,6 +375,43 @@ function prefill(
 
 // ─── Generation ────────────────────────────────────────────────────
 
+/** One turn of conversation history: the human query and the model's response. */
+export interface Turn { q: string; r: string; }
+
+/**
+ * Build the token sequence for a new query, prepending conversation history.
+ *
+ * Layout with 1 history turn:
+ *   [q_prev][SEP][r_prev][SEP][query][SEP]
+ *
+ * maxHistory caps how many turns are injected. Default 1 — Spec512 v1 was
+ * trained on mostly 2-turn sequences so >1 history turn degrades quality.
+ * Increase when a model is retrained with richer multi-turn data.
+ *
+ * Turns are added newest-first; oldest turns are silently dropped when the
+ * context budget (maxLen) would be exceeded.
+ */
+export function buildContextTokens(
+  history: Turn[],
+  query: string,
+  maxLen: number,
+  maxHistory: number = 1,
+): number[] {
+  const queryTokens = [...encode(query.toUpperCase()), SEP];
+  let tokens = queryTokens;
+
+  const recent = history.slice(-maxHistory);
+  for (const turn of [...recent].reverse()) {
+    const chunk = [
+      ...encode(turn.q.toUpperCase()), SEP,
+      ...encode(turn.r.toUpperCase()), SEP,
+    ];
+    if (tokens.length + chunk.length >= maxLen) break;
+    tokens = [...chunk, ...tokens];
+  }
+  return tokens;
+}
+
 export interface Step { char: string; token: number; done: boolean; }
 
 /**
@@ -414,12 +451,14 @@ export async function* generate(
   model: Awaited<ReturnType<typeof loadModel>>,
   prompt: string, maxNew = 160, temp = 0.8, rand: () => number = Math.random,
   cache?: KVCache, topK = 0, topP = 1.0,
+  history?: Turn[],
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
   const win = arch.max_len - 1;
-  // Inject SEP after the prompt — puts the model in "response zone" so it
-  // generates R directly. Matches Python generate() which does the same.
-  const tokens = [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
+  // Build token sequence — with history if provided, bare query otherwise.
+  const tokens = (history && history.length > 0)
+    ? buildContextTokens(history, prompt, win)
+    : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
 
   // -- Cached path ----------------------------------------------------
   if (cache !== undefined) {

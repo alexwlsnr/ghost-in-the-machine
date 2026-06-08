@@ -20,6 +20,7 @@ ts/package-lock.json
 data/soda_full.txt
 data/soda_100k.txt
 data/soda_256.txt
+data/soda_dialogues.txt
 data/shade_soda.txt
 data/training_pairs.txt
 data/wisp_combined.txt

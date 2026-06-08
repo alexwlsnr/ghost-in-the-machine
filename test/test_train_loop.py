@@ -218,5 +218,75 @@ class SeparatorToken(unittest.TestCase):
         self.assertEqual(out, "X", f"Expected 'X', got {repr(out)}")
 
 
+class MultiTurnSequence(unittest.TestCase):
+    """Tests for make_sequence_multiturn() — multi-turn training format."""
+
+    def test_two_turn_has_three_seps_and_eos(self):
+        # 2 turns → Q1[SEP]R1[SEP]Q2[SEP]R2[EOS] = 3 SEPs (formula: 2N-1)
+        turns = [("HELLO", "HEY THERE"), ("HOW ARE YOU", "DOING GREAT")]
+        inp, tgt = tt.make_sequence_multiturn(turns, max_len=256)
+        self.assertGreater(len(inp), 0)
+        self.assertEqual(inp.count(tt.SEP_TOKEN), 3)
+        self.assertEqual(inp[-1], tt.EOS_TOKEN)
+
+    def test_single_turn_matches_make_sequence(self):
+        # make_sequence_multiturn with one pair should match make_sequence
+        turns = [("HELLO", "HEY THERE")]
+        inp_mt, tgt_mt = tt.make_sequence_multiturn(turns, max_len=256)
+        inp_st, tgt_st = tt.make_sequence("HELLO", "HEY THERE", max_len=256)
+        self.assertEqual(inp_mt, inp_st)
+        self.assertEqual(tgt_mt, tgt_st)
+
+    def test_target_is_input_shifted_left(self):
+        turns = [("HI", "HELLO"), ("HOW ARE YOU", "FINE")]
+        inp, tgt = tt.make_sequence_multiturn(turns, max_len=256)
+        # tgt[i] == inp[i+1] for all but the last position
+        for i in range(len(inp) - 1):
+            self.assertEqual(tgt[i], inp[i + 1])
+
+    def test_ends_with_eos_not_sep(self):
+        turns = [("HELLO", "HI"), ("BYE", "GOODBYE")]
+        inp, _ = tt.make_sequence_multiturn(turns, max_len=256)
+        self.assertEqual(inp[-1], tt.EOS_TOKEN)
+        self.assertNotEqual(inp[-2], tt.EOS_TOKEN)
+
+    def test_over_length_returns_empty(self):
+        turns = [("A" * 60, "B" * 60), ("C" * 60, "D" * 60)]
+        inp, tgt = tt.make_sequence_multiturn(turns, max_len=64)
+        self.assertEqual(inp, [])
+        self.assertEqual(tgt, [])
+
+    def test_layout_q1_sep_r1_sep_q2_sep_r2_eos(self):
+        turns = [("HI", "HEY"), ("BYE", "GOODBYE")]
+        inp, _ = tt.make_sequence_multiturn(turns, max_len=256)
+        # Manually build expected
+        q1 = tt.encode("HI")
+        r1 = tt.encode("HEY")
+        q2 = tt.encode("BYE")
+        r2 = tt.encode("GOODBYE")
+        expected = q1 + [tt.SEP_TOKEN] + r1 + [tt.SEP_TOKEN] + q2 + [tt.SEP_TOKEN] + r2 + [tt.EOS_TOKEN]
+        self.assertEqual(inp, expected)
+
+    def test_parse_multiturn_line_two_turns(self):
+        line = "HELLO|HI THERE|HOW ARE YOU|DOING GREAT"
+        turns = tt.parse_multiturn_line(line)
+        self.assertEqual(turns, [("HELLO", "HI THERE"), ("HOW ARE YOU", "DOING GREAT")])
+
+    def test_parse_multiturn_line_single_turn(self):
+        line = "HELLO|HI THERE"
+        turns = tt.parse_multiturn_line(line)
+        self.assertEqual(turns, [("HELLO", "HI THERE")])
+
+    def test_parse_multiturn_line_odd_fields_drops_last(self):
+        # Odd number of pipe-separated fields → drop the last orphan
+        line = "A|B|C"
+        turns = tt.parse_multiturn_line(line)
+        self.assertEqual(turns, [("A", "B")])
+
+    def test_parse_multiturn_line_empty_returns_none(self):
+        self.assertIsNone(tt.parse_multiturn_line(""))
+        self.assertIsNone(tt.parse_multiturn_line("SINGLE_FIELD_NO_PIPE"))
+
+
 if __name__ == "__main__":
     unittest.main()
