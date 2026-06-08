@@ -558,7 +558,7 @@ async function boot() {
     modelCache = {};
     kvCaches   = {};
     appendLine(`KERNEL: switching to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading...`, 'boot');
-    if (prev) switchToModel(prev);
+    if (prev) switchModel(prev);
     // Return focus to input so typing resumes immediately
     input.focus();
   });
