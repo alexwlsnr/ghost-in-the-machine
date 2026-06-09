@@ -284,6 +284,7 @@ export class GPUEngine {
         // KV cache (one pair per layer, persists across tokens)
         this.kCache = [];
         this.vCache = [];
+        this.layerOps = [];
         this._seqLen = 0;
         this.device = device;
         this.arch = arch;
@@ -313,6 +314,7 @@ export class GPUEngine {
         const engine = new GPUEngine(device, arch, pip);
         engine._uploadWeights(arch, sec, wasmMem, base);
         engine._allocActivations(arch);
+        engine._buildOps(); // pre-create all bind groups
         return engine;
     }
     static _compilePipelines(device) {
@@ -420,6 +422,72 @@ export class GPUEngine {
             this.vCache.push(emptyStorageBuf(device, cacheBytes));
         }
     }
+    // Build GPUOp objects — called once after all buffers are allocated.
+    // Each op captures (pipeline, bindGroup, workgroupCount) so _step can
+    // dispatch them without any per-token object creation.
+    _buildOps() {
+        const { device, arch, pip } = this;
+        const { d_model: d, n_heads: nh, d_ff: ff, n_layers: nl, vocab_size: vs } = arch;
+        const dWgs = Math.ceil(d / 256);
+        const ffWgs = Math.ceil(ff / 256);
+        const vsWgs = Math.ceil(vs / 256);
+        const mkBG = (pipeline, bufs) => device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: bufs.map((b, i) => ({ binding: i, resource: { buffer: b } })),
+        });
+        const mkMat = (wt, input, output) => {
+            const wgs = Math.ceil(wt.outDim / 256);
+            if (wt.dtype === 'int4g') {
+                const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
+                    : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
+                        : this.matQKVOPBuf;
+                return { pip: pip.matI4g, bg: mkBG(pip.matI4g, [wt.nibBuf, wt.sclBuf, input, wt.biasBuf, output, pb]), wgs };
+            }
+            else if (wt.dtype === 'int8') {
+                return { pip: pip.matI8, bg: mkBG(pip.matI8, [wt.int8Buf, input, wt.biasBuf, output, wt.paramBuf]), wgs };
+            }
+            else {
+                const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
+                    : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
+                        : this.matQKVOPBuf;
+                return { pip: pip.matF32, bg: mkBG(pip.matF32, [wt.f32Buf, input, wt.biasBuf, output, pb]), wgs };
+            }
+        };
+        // Embed op (bind group references per-token uniform — contents updated each step,
+        // but the GPUBuffer object is stable so the bind group stays valid)
+        this.embedOp = { pip: pip.embed, wgs: dWgs,
+            bg: mkBG(pip.embed, [this.tokEmb, this.posEmb, this.xBuf, this.embedPBuf]) };
+        // Per-layer ops
+        for (let li = 0; li < nl; li++) {
+            const ln1bg = mkBG(pip.ln, [this.xBuf, this.ln1w[li], this.ln1b[li], this.lnBuf, this.lnPBuf]);
+            const wkvKbg = mkBG(pip.writeKV, [this.kvBuf, this.kCache[li], this.wkvPBuf]);
+            const wkvVbg = mkBG(pip.writeKV, [this.kvBuf, this.vCache[li], this.wkvPBuf]);
+            const attnbg = mkBG(pip.attn, [this.qBuf, this.kCache[li], this.vCache[li], this.attnBuf, this.attnPBuf]);
+            const addbg = mkBG(pip.add, [this.xBuf, this.lnBuf, this.addPBuf]);
+            const ln2bg = mkBG(pip.ln, [this.xBuf, this.ln2w[li], this.ln2b[li], this.lnBuf, this.lnPBuf]);
+            const relubg = mkBG(pip.relu, [this.ffBuf, this.reluPBuf]);
+            this.layerOps.push({
+                ln1: { pip: pip.ln, bg: ln1bg, wgs: 1 },
+                q: mkMat(this.qT[li], this.lnBuf, this.qBuf),
+                k: mkMat(this.kT[li], this.lnBuf, this.kvBuf),
+                wkvK: { pip: pip.writeKV, bg: wkvKbg, wgs: dWgs },
+                v: mkMat(this.vT[li], this.lnBuf, this.kvBuf),
+                wkvV: { pip: pip.writeKV, bg: wkvVbg, wgs: dWgs },
+                attn: { pip: pip.attn, bg: attnbg, wgs: nh },
+                o: mkMat(this.oT[li], this.attnBuf, this.lnBuf),
+                addResid: { pip: pip.add, bg: addbg, wgs: dWgs },
+                ln2: { pip: pip.ln, bg: ln2bg, wgs: 1 },
+                ff1: mkMat(this.ff1T[li], this.lnBuf, this.ffBuf),
+                relu: { pip: pip.relu, bg: relubg, wgs: ffWgs },
+                ff2: mkMat(this.ff2T[li], this.ffBuf, this.lnBuf),
+            });
+        }
+        // Final LN + head
+        this.finalLnOp = { pip: pip.ln, wgs: 1,
+            bg: mkBG(pip.ln, [this.xBuf, this.lnFw, this.lnFb, this.lnBuf, this.lnPBuf]) };
+        this.headOp = { pip: pip.matF32, wgs: vsWgs,
+            bg: mkBG(pip.matF32, [this.headW, this.lnBuf, this.zeroBuf, this.logBuf, this.headPBuf]) };
+    }
     // ── Public API ─────────────────────────────────────────────────────────────
     /** Prefill KV cache with all prompt tokens. Returns logits for last position. */
     async prefill(tokens) {
@@ -460,149 +528,54 @@ export class GPUEngine {
         this.device.destroy();
     }
     // ── Core inference step ───────────────────────────────────────────────────
+    // Dispatch a pre-built op into the command encoder — zero allocation.
+    _run(enc, op) {
+        const pass = enc.beginComputePass();
+        pass.setPipeline(op.pip);
+        pass.setBindGroup(0, op.bg);
+        pass.dispatchWorkgroups(op.wgs);
+        pass.end();
+    }
     async _step(token) {
-        const { device, arch, pip } = this;
-        const { d_model: d, n_heads: nh, n_layers: nl, d_ff: ff, vocab_size: vs } = arch;
-        const dh = d / nh;
+        const { device, arch } = this;
+        const { d_model: d, n_heads: nh, n_layers: nl, vocab_size: vs } = arch;
         const pos = this._seqLen;
         const seqLen = pos + 1;
-        // Update per-token uniforms
+        // Update per-token uniform buffer contents (bind groups reference the buffer
+        // objects, which are stable; only the data inside changes each token)
         device.queue.writeBuffer(this.embedPBuf, 0, new Uint32Array([token, pos, d]));
         device.queue.writeBuffer(this.wkvPBuf, 0, new Uint32Array([pos, d]));
-        device.queue.writeBuffer(this.attnPBuf, 0, new Uint32Array([seqLen, nh, dh, d]));
+        device.queue.writeBuffer(this.attnPBuf, 0, new Uint32Array([seqLen, nh, d / nh, d]));
+        // Encode the full forward pass — no object allocation inside this loop
         const enc = device.createCommandEncoder();
-        // 1. Token + positional embedding → xBuf
-        this._passEmbed(enc);
-        // 2. Transformer layers
+        this._run(enc, this.embedOp);
         for (let li = 0; li < nl; li++) {
-            // Attention block
-            this._passLN(enc, this.xBuf, this.ln1w[li], this.ln1b[li], this.lnBuf);
-            this._passMat(enc, this.qT[li], this.lnBuf, this.qBuf);
-            this._passMat(enc, this.kT[li], this.lnBuf, this.kvBuf);
-            this._passWKV(enc, this.kvBuf, this.kCache[li]);
-            this._passMat(enc, this.vT[li], this.lnBuf, this.kvBuf);
-            this._passWKV(enc, this.kvBuf, this.vCache[li]);
-            this._passAttn(enc, li);
-            this._passMat(enc, this.oT[li], this.attnBuf, this.lnBuf);
-            this._passAdd(enc, this.xBuf, this.lnBuf);
-            // FFN block
-            this._passLN(enc, this.xBuf, this.ln2w[li], this.ln2b[li], this.lnBuf);
-            this._passMat(enc, this.ff1T[li], this.lnBuf, this.ffBuf);
-            this._passReLU(enc);
-            this._passMat(enc, this.ff2T[li], this.ffBuf, this.lnBuf);
-            this._passAdd(enc, this.xBuf, this.lnBuf);
+            const L = this.layerOps[li];
+            this._run(enc, L.ln1);
+            this._run(enc, L.q);
+            this._run(enc, L.k);
+            this._run(enc, L.wkvK);
+            this._run(enc, L.v);
+            this._run(enc, L.wkvV);
+            this._run(enc, L.attn);
+            this._run(enc, L.o);
+            this._run(enc, L.addResid);
+            this._run(enc, L.ln2);
+            this._run(enc, L.ff1);
+            this._run(enc, L.relu);
+            this._run(enc, L.ff2);
+            this._run(enc, L.addResid);
         }
-        // 3. Final layernorm + head projection
-        this._passLN(enc, this.xBuf, this.lnFw, this.lnFb, this.lnBuf);
-        this._passHead(enc);
-        // 4. Copy logits to staging buffer and submit
+        this._run(enc, this.finalLnOp);
+        this._run(enc, this.headOp);
         enc.copyBufferToBuffer(this.logBuf, 0, this.stagBuf, 0, vs * 4);
         device.queue.submit([enc.finish()]);
-        // 5. Read back logits (only 258 × 4 = ~1 KB)
+        // Read back 258 logit floats — only CPU↔GPU transfer per token
         await this.stagBuf.mapAsync(GPU_MAP_READ);
         const result = new Float32Array(this.stagBuf.getMappedRange().slice(0));
         this.stagBuf.unmap();
-        // Debug: log logit stats for the first step of each generate call
-        if (pos === 0) {
-            let mn = Infinity, mx = -Infinity, nans = 0;
-            for (let i = 0; i < result.length; i++) {
-                if (isNaN(result[i])) {
-                    nans++;
-                }
-                else {
-                    mn = Math.min(mn, result[i]);
-                    mx = Math.max(mx, result[i]);
-                }
-            }
-            const top3 = Array.from(result).map((v, i) => [i, v])
-                .sort((a, b) => b[1] - a[1]).slice(0, 3);
-            console.log(`[gpu] pos=0 logits: min=${mn.toFixed(3)} max=${mx.toFixed(3)} nans=${nans} top3=`, top3);
-        }
         this._seqLen = seqLen;
         return result;
-    }
-    // ── Compute pass helpers ──────────────────────────────────────────────────
-    _bg(pipeline, buffers) {
-        return this.device.createBindGroup({
-            layout: pipeline.getBindGroupLayout(0),
-            entries: buffers.map((b, i) => ({ binding: i, resource: { buffer: b } })),
-        });
-    }
-    _passEmbed(enc) {
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.embed);
-        pass.setBindGroup(0, this._bg(this.pip.embed, [this.tokEmb, this.posEmb, this.xBuf, this.embedPBuf]));
-        pass.dispatchWorkgroups(Math.ceil(this.arch.d_model / 256));
-        pass.end();
-    }
-    _passLN(enc, x, w, b, y) {
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.ln);
-        pass.setBindGroup(0, this._bg(this.pip.ln, [x, w, b, y, this.lnPBuf]));
-        pass.dispatchWorkgroups(1); // single workgroup reduction for d ≤ 512
-        pass.end();
-    }
-    _passMat(enc, wt, input, output) {
-        const { d_model: d, d_ff: ff } = this.arch;
-        const wgs = Math.ceil(wt.outDim / 256);
-        const pass = enc.beginComputePass();
-        if (wt.dtype === 'int4g') {
-            const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
-                : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
-                    : this.matQKVOPBuf;
-            pass.setPipeline(this.pip.matI4g);
-            pass.setBindGroup(0, this._bg(this.pip.matI4g, [wt.nibBuf, wt.sclBuf, input, wt.biasBuf, output, pb]));
-        }
-        else if (wt.dtype === 'int8') {
-            pass.setPipeline(this.pip.matI8);
-            pass.setBindGroup(0, this._bg(this.pip.matI8, [wt.int8Buf, input, wt.biasBuf, output, wt.paramBuf]));
-        }
-        else {
-            const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
-                : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
-                    : this.matQKVOPBuf;
-            pass.setPipeline(this.pip.matF32);
-            pass.setBindGroup(0, this._bg(this.pip.matF32, [wt.f32Buf, input, wt.biasBuf, output, pb]));
-        }
-        pass.dispatchWorkgroups(wgs);
-        pass.end();
-    }
-    _passWKV(enc, src, dst) {
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.writeKV);
-        pass.setBindGroup(0, this._bg(this.pip.writeKV, [src, dst, this.wkvPBuf]));
-        pass.dispatchWorkgroups(Math.ceil(this.arch.d_model / 256));
-        pass.end();
-    }
-    _passAttn(enc, li) {
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.attn);
-        pass.setBindGroup(0, this._bg(this.pip.attn, [this.qBuf, this.kCache[li], this.vCache[li], this.attnBuf, this.attnPBuf]));
-        pass.dispatchWorkgroups(this.arch.n_heads);
-        pass.end();
-    }
-    _passAdd(enc, a, b) {
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.add);
-        pass.setBindGroup(0, this._bg(this.pip.add, [a, b, this.addPBuf]));
-        pass.dispatchWorkgroups(Math.ceil(this.arch.d_model / 256));
-        pass.end();
-    }
-    _passReLU(enc) {
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.relu);
-        pass.setBindGroup(0, this._bg(this.pip.relu, [this.ffBuf, this.reluPBuf]));
-        pass.dispatchWorkgroups(Math.ceil(this.arch.d_ff / 256));
-        pass.end();
-    }
-    _passHead(enc) {
-        // Head projection is always fp32 (head_weight stored as float32)
-        const { vocab_size: vs } = this.arch;
-        const pass = enc.beginComputePass();
-        pass.setPipeline(this.pip.matF32);
-        pass.setBindGroup(0, this._bg(this.pip.matF32, [this.headW, this.lnBuf, this.zeroBuf, this.logBuf, this.headPBuf]));
-        pass.dispatchWorkgroups(Math.ceil(vs / 256));
-        pass.end();
     }
 }
 //# sourceMappingURL=gpu_engine.js.map
