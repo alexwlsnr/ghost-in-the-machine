@@ -35,7 +35,7 @@
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 80,
+      "max_new": 55,
       "primary": true,
       "default": false,
       "available": true
@@ -49,7 +49,7 @@
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 80,
+      "max_new": 55,
       "default": false,
       "available": true
     },
@@ -98,7 +98,7 @@
       "size_mb": 18,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 80,
+      "max_new": 55,
       "default": false,
       "available": true
     },
