@@ -24,10 +24,10 @@ nohup .venv/bin/python3 -u py/train_transformer.py \
     --n-layers 4 \
     --d-ff 1024 \
     --max-len 256 \
-    --batch-size 32 \
+    --batch-size 64 \
     --lr 0.001 \
     --epochs 200 \
-    --val-frac 0.05 \
+    --val-frac 0.02 \
     --patience 20 \
     --truncate \
     --status-file "logs/wisp_ternary_status.json" \
