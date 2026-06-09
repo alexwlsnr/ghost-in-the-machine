@@ -31,14 +31,14 @@
     {
       "id": "spec512-v1.1",
       "name": "Spec512",
-      "description": "27M params \u00b7 27MB \u00b7 multi-turn",
+      "description": "Spec512 v1.1 \u2014 original SODA training (val=0.511)",
       "bin": "model_spec512_v1.1_8bit.bin",
       "json": "model_spec512_v1.1_8bit.json",
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 55,
-      "primary": true,
+      "max_new": 120,
+      "primary": false,
       "default": false,
       "available": true,
       "temp": 0.5
@@ -52,7 +52,7 @@
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 55,
+      "max_new": 120,
       "default": false,
       "available": true
     },
@@ -101,7 +101,7 @@
       "size_mb": 18,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 55,
+      "max_new": 120,
       "default": false,
       "available": true
     },
@@ -166,20 +166,6 @@
       "available": true
     },
     {
-      "id": "spec512-v1.2-ep27",
-      "name": "Spec512 v1.2 ep27",
-      "description": "Spec512 v1.2 in-training snapshot (ep27, val=0.556)",
-      "bin": "model_spec512_v1.2_ep27.bin",
-      "json": "model_spec512_v1.2_ep27.json",
-      "params": "26M",
-      "ctx": "1024",
-      "size_mb": 27.2,
-      "available": true,
-      "primary": false,
-      "max_new": 55,
-      "rep_penalty": 1.35
-    },
-    {
       "id": "wisp-ternary",
       "name": "Wisp Ternary",
       "description": "First ternary weight model \u2014 3.3M params, 1.6 MB, {-1,0,+1} weights via STE",
@@ -193,6 +179,21 @@
       "max_new": 80,
       "rep_penalty": 1.15,
       "temp": 0.4
+    },
+    {
+      "id": "spec512-v1.2",
+      "name": "Spec512 v1.2",
+      "description": "Spec512 trained on clean filtered dataset \u2014 better quality output",
+      "bin": "model_spec512_v1.2_8bit.bin",
+      "json": "model_spec512_v1.2_8bit.json",
+      "params": "27.6M",
+      "ctx": "1024",
+      "size_mb": 27.2,
+      "available": true,
+      "primary": true,
+      "max_new": 120,
+      "rep_penalty": 1.35,
+      "temp": 0.5
     }
   ]
 }

@@ -874,12 +874,16 @@ input.addEventListener('keydown', async (e) => {
   const history = memoryOn ? (histories[activeId] || []) : undefined;
   console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
 
+  let hitLimit = false;
   try {
     // Larger models on longer contexts can ramble — cap response length per model
-    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 80 : 160);
+    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 120 : 160);
     const gpu = gpuEngines[activeId] || undefined;
     for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : kvCaches[activeId], 0, 1.0, history, gpu)) {
-      if (step.done) break;
+      if (step.done) {
+        hitLimit = step.token !== 257; // 257=EOS = clean stop; PAD/ctx = truncated
+        break;
+      }
 
       // Replace thinking indicator with response on first token
       if (tokenCount === 0) {
@@ -905,10 +909,9 @@ input.addEventListener('keydown', async (e) => {
     appendLine(`ERROR: ${e.message}`, 'error');
   }
 
-  // Graceful ending: trim trailing garbage at the context/EOS limit.
-  // Model EOS prediction is imprecise (~2K training examples), so we
-  // trim back to the last likely sentence boundary or word.
-  if (response && !/[.!?]\s*$/.test(response)) {
+  // Only trim when generation was cut off mid-sentence (hit token/context limit).
+  // When the model fired EOS cleanly, trust its ending.
+  if (hitLimit && response && !/[.!?]\s*$/.test(response)) {
     // Find last sentence boundary: . ! ? followed by space or uppercase (new sentence)
     let best = -1;
     for (const re of [/[.!?] [A-Z]/g, /[.!?][A-Z]/g]) {
