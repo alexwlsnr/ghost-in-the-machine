@@ -27,11 +27,11 @@
       "available": true
     },
     {
-      "id": "spec512",
+      "id": "spec512-v1.1",
       "name": "Spec512",
       "description": "27M params \u00b7 27MB \u00b7 multi-turn",
-      "bin": "model_spec512_8bit.bin",
-      "json": "model_spec512_8bit.json",
+      "bin": "model_spec512_v1.1_8bit.bin",
+      "json": "model_spec512_v1.1_8bit.json",
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
@@ -41,11 +41,11 @@
       "available": true
     },
     {
-      "id": "spec512-v1.1",
-      "name": "Spec512 v1.1",
-      "description": "27.6M params \u00b7 27MB \u00b7 retrained \u00b7 ctx 1024 \u00b7 val_loss 0.5107",
-      "bin": "model_spec512_v1.1_8bit.bin",
-      "json": "model_spec512_v1.1_8bit.json",
+      "id": "spec512",
+      "name": "Spec512 v1",
+      "description": "27M params \u00b7 27MB \u00b7 original \u00b7 ctx 1024",
+      "bin": "model_spec512_8bit.bin",
+      "json": "model_spec512_8bit.json",
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
