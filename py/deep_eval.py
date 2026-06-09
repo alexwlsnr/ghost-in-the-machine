@@ -18,8 +18,8 @@ import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from train_transformer import (
-    TinyTransformer, TinyTransformerModern, generate, encode,
-    PAD_TOKEN, EOS_TOKEN, SEP_TOKEN,
+    TinyTransformer, TinyTransformerModern, TinyTransformerTernary,
+    generate, encode, PAD_TOKEN, EOS_TOKEN, SEP_TOKEN,
 )
 
 # ── Prompt suite ──────────────────────────────────────────────────────────────
@@ -93,9 +93,19 @@ def load_model(checkpoint_path: str):
     """Load a model from checkpoint, detecting architecture automatically."""
     ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     arch = ckpt['architecture']
-    is_modern = arch.get('arch', 'classic') == 'modern'
+    is_ternary = arch.get('arch') == 'ternary'
+    is_modern  = arch.get('arch') == 'modern'
 
-    if is_modern:
+    if is_ternary:
+        model = TinyTransformerTernary(
+            vocab_size=arch['vocab_size'],
+            d_model=arch['d_model'],
+            n_heads=arch['n_heads'],
+            n_layers=arch['n_layers'],
+            d_ff=arch['d_ff'],
+            max_len=arch['max_len'],
+        )
+    elif is_modern:
         # Detect flags from state dict since they aren't always in the arch dict
         state = ckpt['model_state']
         use_rope    = 'pos_embed.weight' not in state  # no pos_embed → RoPE

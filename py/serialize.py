@@ -251,7 +251,9 @@ def serialize(
 
     if is_ternary:
         # TinyTransformerTernary state dict: blocks.{li}.attn.{q/k/v/o}_proj + ff.{w1/w2}
-        add("token_embed", state["token_embed.weight"] * sqrt_d)
+        # NOTE: ternary forward() does NOT multiply embeddings by sqrt(d_model),
+        # so store raw weights here (no pre-scaling unlike classic/modern arch).
+        add("token_embed", state["token_embed.weight"])
         add("pos_embed",   state["pos_embed.weight"])
         for li in range(nlayers):
             pfx = f"enc{li}"
