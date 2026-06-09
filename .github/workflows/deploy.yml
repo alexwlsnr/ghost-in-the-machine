@@ -61,7 +61,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: ts/package-lock.json
+          cache-dependency-path: ts/package.json
 
       - name: Install & build TypeScript
         if: steps.changes.outputs.ts == 'true'
