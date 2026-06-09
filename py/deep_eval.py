@@ -205,7 +205,8 @@ def main():
         model, arch, val_loss, epoch = load_model(ckpt_path)
         results = eval_model(model, PROMPTS, args.temp, args.max_new, args.seed)
         checkpoint_results[name] = (results, val_loss or 0.0, epoch)
-        print(f"  Done — val_loss={val_loss:.4f}, epoch={epoch}", file=sys.stderr)
+        vl_str = f"{val_loss:.4f}" if val_loss is not None else "?"
+        print(f"  Done — val_loss={vl_str}, epoch={epoch}", file=sys.stderr)
 
     if not checkpoint_results:
         print("No checkpoints loaded.", file=sys.stderr)
