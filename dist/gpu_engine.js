@@ -3,7 +3,7 @@
  *
  * Replaces the Wasm matmul dispatch for large models (>= GPU_THRESHOLD_BYTES).
  * Supports classic arch: LayerNorm, ReLU FFN, learned positional embeddings.
- * Weight formats: float32 and int4g (per-group 4-bit quantization).
+ * Weight formats: float32, int8 (per-tensor scale), int4g (per-group 4-bit).
  *
  * All weights are uploaded to GPU VRAM once at construction time.
  * The KV cache lives on GPU across tokens; only 258 logit floats are
@@ -214,6 +214,29 @@ struct P { n: u32 }
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x; if (i < p.n) { x[i] = max(0.0f, x[i]); }
 }`;
+// int8 weights packed as bytes in u32 (4 weights per u32, little-endian byte order).
+// scale is per-tensor, stored as f32 in the uniform (at byte offset 8 in the struct).
+const MATMUL_INT8_SHADER = /* wgsl */ `
+struct P { in_dim: u32, out_dim: u32, scale: f32, has_bias: u32 }
+@group(0) @binding(0) var<storage, read>       w:    array<u32>;
+@group(0) @binding(1) var<storage, read>       x:    array<f32>;
+@group(0) @binding(2) var<storage, read>       bias: array<f32>;
+@group(0) @binding(3) var<storage, read_write> y:    array<f32>;
+@group(0) @binding(4) var<uniform>             p:    P;
+fn i8_val(flat: u32) -> f32 {
+  let byte_u = (w[flat >> 2u] >> ((flat & 3u) << 3u)) & 0xFFu;
+  return f32(i32(byte_u) - select(0, 256, byte_u >= 128u));
+}
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let row = gid.x;
+  if (row >= p.out_dim) { return; }
+  var sum = 0.0;
+  let base = row * p.in_dim;
+  for (var col = 0u; col < p.in_dim; col++) { sum += i8_val(base + col) * p.scale * x[col]; }
+  if (p.has_bias != 0u) { sum += bias[row]; }
+  y[row] = sum;
+}`;
 // ── Buffer utilities ─────────────────────────────────────────────────────────
 // Use raw WebGPU spec values rather than GPUBufferUsage.* globals — the globals
 // may not exist at module evaluation time in non-WebGPU environments.
@@ -302,6 +325,7 @@ export class GPUEngine {
             ln: mk(LAYERNORM_SHADER),
             matF32: mk(MATMUL_F32_SHADER),
             matI4g: mk(MATMUL_INT4G_SHADER),
+            matI8: mk(MATMUL_INT8_SHADER),
             writeKV: mk(WRITE_KV_SHADER),
             attn: mk(ATTENTION_SHADER),
             add: mk(ADD_SHADER),
@@ -322,6 +346,16 @@ export class GPUEngine {
                 const nibBytes = new Uint8Array(mem8.buffer, base + s.offset, s.size);
                 wt.nibBuf = uploadBuf(device, nibBytes, ST);
                 wt.sclBuf = uploadBuf(device, new Float32Array(mem8.buffer, base + s.scales_offset, s.scales_size / 4), ST);
+            }
+            else if (s.dtype === 'int8') {
+                wt.int8Buf = uploadBuf(device, new Uint8Array(mem8.buffer, base + s.offset, s.size), ST);
+                // Pack {in_dim: u32, out_dim: u32, scale: f32, has_bias: u32} into 16-byte uniform
+                const pb = new ArrayBuffer(16);
+                new Uint32Array(pb)[0] = inp;
+                new Uint32Array(pb)[1] = out;
+                new Float32Array(pb)[2] = s.scale ?? 1.0;
+                new Uint32Array(pb)[3] = 1;
+                wt.paramBuf = uploadBuf(device, new Uint8Array(pb), UN);
             }
             else {
                 wt.f32Buf = f32Sec(wName);
@@ -419,6 +453,8 @@ export class GPUEngine {
             t.f32Buf?.destroy();
             t.nibBuf?.destroy();
             t.sclBuf?.destroy();
+            t.int8Buf?.destroy();
+            t.paramBuf?.destroy();
             t.biasBuf.destroy();
         }
         this.device.destroy();
@@ -434,46 +470,6 @@ export class GPUEngine {
         device.queue.writeBuffer(this.embedPBuf, 0, new Uint32Array([token, pos, d]));
         device.queue.writeBuffer(this.wkvPBuf, 0, new Uint32Array([pos, d]));
         device.queue.writeBuffer(this.attnPBuf, 0, new Uint32Array([seqLen, nh, dh, d]));
-        // ── DEBUG: run layer 0 step-by-step to find NaN source ─────────────────
-        if (pos === 0) {
-            const dbg = async (label, buf, enc) => {
-                if (enc) {
-                    device.queue.submit([enc.finish()]);
-                }
-                const cp = device.createCommandEncoder();
-                cp.copyBufferToBuffer(buf, 0, this.stagBuf, 0, 8 * 4);
-                device.queue.submit([cp.finish()]);
-                await this.stagBuf.mapAsync(GPU_MAP_READ);
-                const vals = Array.from(new Float32Array(this.stagBuf.getMappedRange().slice(0, 32)));
-                this.stagBuf.unmap();
-                const hasNaN = vals.some(isNaN);
-                console.log(`[gpu] ${label}:`, hasNaN ? 'NaN!' : vals.slice(0, 4).map(v => v.toFixed(3)).join(', '));
-            };
-            // Embed
-            let e = device.createCommandEncoder();
-            this._passEmbed(e);
-            await dbg('xBuf after embed', this.xBuf, e);
-            // LN1 of layer 0
-            e = device.createCommandEncoder();
-            this._passLN(e, this.xBuf, this.ln1w[0], this.ln1b[0], this.lnBuf);
-            await dbg('lnBuf after LN1[0]', this.lnBuf, e);
-            // Q matmul of layer 0
-            e = device.createCommandEncoder();
-            this._passMat(e, this.qT[0], this.lnBuf, this.qBuf);
-            await dbg('qBuf after Q-mat[0]', this.qBuf, e);
-            // K and V (write to cache)
-            e = device.createCommandEncoder();
-            this._passMat(e, this.kT[0], this.lnBuf, this.kvBuf);
-            this._passWKV(e, this.kvBuf, this.kCache[0]);
-            this._passMat(e, this.vT[0], this.lnBuf, this.kvBuf);
-            this._passWKV(e, this.kvBuf, this.vCache[0]);
-            await dbg('kvBuf after V-mat[0]', this.kvBuf, e);
-            // Attention
-            e = device.createCommandEncoder();
-            this._passAttn(e, 0);
-            await dbg('attnBuf after attn[0]', this.attnBuf, e);
-        }
-        // ── END DEBUG ──────────────────────────────────────────────────────────
         const enc = device.createCommandEncoder();
         // 1. Token + positional embedding → xBuf
         this._passEmbed(enc);
@@ -548,17 +544,23 @@ export class GPUEngine {
     }
     _passMat(enc, wt, input, output) {
         const { d_model: d, d_ff: ff } = this.arch;
-        // Select the pre-built params uniform for this shape
-        const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
-            : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
-                : this.matQKVOPBuf;
         const wgs = Math.ceil(wt.outDim / 256);
         const pass = enc.beginComputePass();
         if (wt.dtype === 'int4g') {
+            const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
+                : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
+                    : this.matQKVOPBuf;
             pass.setPipeline(this.pip.matI4g);
             pass.setBindGroup(0, this._bg(this.pip.matI4g, [wt.nibBuf, wt.sclBuf, input, wt.biasBuf, output, pb]));
         }
+        else if (wt.dtype === 'int8') {
+            pass.setPipeline(this.pip.matI8);
+            pass.setBindGroup(0, this._bg(this.pip.matI8, [wt.int8Buf, input, wt.biasBuf, output, wt.paramBuf]));
+        }
         else {
+            const pb = (wt.outDim === ff && wt.inDim === d) ? this.matFF1PBuf
+                : (wt.outDim === d && wt.inDim === ff) ? this.matFF2PBuf
+                    : this.matQKVOPBuf;
             pass.setPipeline(this.pip.matF32);
             pass.setBindGroup(0, this._bg(this.pip.matF32, [wt.f32Buf, input, wt.biasBuf, output, pb]));
         }
