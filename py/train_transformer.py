@@ -418,6 +418,144 @@ class TinyTransformerModern(nn.Module):
         return self.head(h)
 
 
+# ─── Ternary architecture ───────────────────────────────────────────
+
+class TernaryLinear(nn.Module):
+    """Linear layer that pushes weights toward {-scale, 0, +scale} via STE.
+
+    Forward pass: weights are ternarized using absmean thresholding.
+    Backward pass: gradients flow through the continuous fp32 weights
+    (straight-through estimator) so the optimizer can move them.
+
+    Scale = absmean(weight). Threshold = 0.5 * scale.
+    Values with |w| < threshold collapse to 0; others become ±scale.
+    """
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias   = nn.Parameter(torch.zeros(out_features)) if bias else None
+        nn.init.normal_(self.weight, std=0.02)
+
+    def ternarize(self, w: torch.Tensor) -> torch.Tensor:
+        scale     = w.abs().mean().clamp(min=1e-8)
+        threshold = 0.5 * scale
+        return scale * torch.where(w.abs() < threshold,
+                                   torch.zeros_like(w),
+                                   torch.sign(w))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # STE: use ternary values in forward, let gradient pass through fp32 weight
+        w_t = self.weight + (self.ternarize(self.weight) - self.weight).detach()
+        return F.linear(x, w_t, self.bias)
+
+
+class _TernaryAttention(nn.Module):
+    """Multi-head causal self-attention with ternary Q/K/V/O projections."""
+
+    def __init__(self, d_model: int, n_heads: int):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.n_heads = n_heads
+        self.d_head  = d_model // n_heads
+        self.q_proj  = TernaryLinear(d_model, d_model)
+        self.k_proj  = TernaryLinear(d_model, d_model)
+        self.v_proj  = TernaryLinear(d_model, d_model)
+        self.o_proj  = TernaryLinear(d_model, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, d = x.shape
+        q = self.q_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        k = self.k_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        v = self.v_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        scale  = math.sqrt(self.d_head)
+        scores = (q @ k.transpose(-2, -1)) / scale
+        mask   = torch.triu(torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
+        scores = scores.masked_fill(mask, float('-inf'))
+        attn   = F.softmax(scores, dim=-1)
+        out    = (attn @ v).transpose(1, 2).contiguous().view(B, T, d)
+        return self.o_proj(out)
+
+
+class _TernaryFFN(nn.Module):
+    """Position-wise FFN: TernaryLinear → ReLU → TernaryLinear."""
+
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = TernaryLinear(d_model, d_ff)
+        self.w2 = TernaryLinear(d_ff, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(F.relu(self.w1(x)))
+
+
+class _TernaryBlock(nn.Module):
+    """Pre-norm transformer block with ternary attention and FFN."""
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(d_model)
+        self.attn  = _TernaryAttention(d_model, n_heads)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.ff    = _TernaryFFN(d_model, d_ff)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x))
+        x = x + self.ff(self.norm2(x))
+        return x
+
+
+class TinyTransformerTernary(nn.Module):
+    """Wisp-scale causal transformer with ternary linear weights.
+
+    Same structure as TinyTransformer (classic) but all attention and FFN
+    projections use TernaryLinear with straight-through estimator training.
+    Embeddings, layer norms, and biases remain fp32.
+
+    Intended for fast experimentation on a secondary GPU before committing
+    to full Revenant (300M) training.
+    """
+
+    arch = 'ternary'
+
+    def __init__(self, vocab_size: int, d_model: int, n_heads: int,
+                 n_layers: int, d_ff: int, max_len: int):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model    = d_model
+        self.n_heads    = n_heads
+        self.n_layers   = n_layers
+        self.d_ff       = d_ff
+        self.max_len    = max_len
+
+        self.token_embed = nn.Embedding(vocab_size, d_model)
+        self.pos_embed   = nn.Embedding(max_len, d_model)
+        self.blocks      = nn.ModuleList([
+            _TernaryBlock(d_model, n_heads, d_ff) for _ in range(n_layers)
+        ])
+        self.ln_final = nn.LayerNorm(d_model)
+        self.head     = nn.Linear(d_model, vocab_size, bias=False)
+        self.head.weight = self.token_embed.weight  # weight tying
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.token_embed.weight, std=0.02)
+
+    def compute_quantization_loss(self, weight_bits: int = 4) -> torch.Tensor:
+        # STE handles ternarization natively — no extra QAT penalty needed
+        return torch.tensor(0.0, device=next(self.parameters()).device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        pos = torch.arange(T, device=x.device).unsqueeze(0)
+        h   = self.token_embed(x) + self.pos_embed(pos)
+        for block in self.blocks:
+            h = block(h)
+        h = self.ln_final(h)
+        return self.head(h)
+
+
 # ─── Sequence builders ──────────────────────────────────────────────
 
 def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
@@ -753,7 +891,9 @@ def train_transformer(
                 'model_state': model.state_dict(),
                 'architecture': {
                     'type': 'tiny_transformer',
-                    'arch': 'modern' if isinstance(model, TinyTransformerModern) else 'classic',
+                    'arch': ('ternary' if isinstance(model, TinyTransformerTernary)
+                             else 'modern' if isinstance(model, TinyTransformerModern)
+                             else 'classic'),
                     # Save individual modern flags so loaders don't need to infer from state dict
                     **({'use_rope':     model.use_rope,
                         'use_swiglu':   any(hasattr(b.ff, 'w1') for b in model.blocks),
@@ -894,7 +1034,7 @@ if __name__ == '__main__':
                         help='disable uppercase normalization (required for Wraith/technical models)')
     parser.add_argument('--truncate', action='store_true',
                         help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
-    parser.add_argument('--arch', default='classic', choices=['classic', 'modern'],
+    parser.add_argument('--arch', default='classic', choices=['classic', 'modern', 'ternary'],
                         help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
     parser.add_argument('--mask-query-loss', action='store_true',
                         help='only compute loss on response tokens (masks query positions)')
@@ -945,7 +1085,16 @@ if __name__ == '__main__':
         remaining = max(1, args.epochs - start_epoch)
         print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
     else:
-        if args.arch == 'modern':
+        if args.arch == 'ternary':
+            model = TinyTransformerTernary(
+                vocab_size=VOCAB_SIZE,
+                d_model=args.d_model,
+                n_heads=args.n_heads,
+                n_layers=args.n_layers,
+                d_ff=args.d_ff,
+                max_len=args.max_len,
+            )
+        elif args.arch == 'modern':
             model = TinyTransformerModern(
                 vocab_size=VOCAB_SIZE,
                 d_model=args.d_model,

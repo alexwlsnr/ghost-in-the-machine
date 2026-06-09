@@ -111,6 +111,40 @@ def quantize_4bit_grouped(
     return bytes(out), scales
 
 
+def quantize_ternary(tensor: torch.Tensor) -> tuple[bytes, float]:
+    """Pack a float32 tensor into 2-bit ternary codes with a single absmean scale.
+
+    Encoding (2 bits per weight, 4 weights per byte, high bits first):
+      00 = -1 (negative)   stored as (value / scale ≈ -1)
+      01 =  0 (zero)       |value| < 0.5 * scale
+      10 = +1 (positive)   value / scale ≈ +1
+      11 = unused (treated as 0 on decode)
+
+    Returns (packed_bytes, scale) where scale = absmean(tensor).
+    """
+    t = tensor.detach().cpu().to(torch.float32).numpy().ravel()
+    scale = float(np.mean(np.abs(t)))
+    if scale < 1e-8:
+        scale = 1.0
+    threshold = 0.5 * scale
+
+    # Classify: 0=negative, 1=zero, 2=positive
+    codes = np.ones(len(t), dtype=np.uint8)          # default: zero
+    codes[t >= threshold]  = 2                        # positive
+    codes[t <= -threshold] = 0                        # negative
+
+    n_bytes = (len(t) + 3) // 4
+    out = bytearray(n_bytes)
+    for i in range(n_bytes):
+        byte = 0
+        for j in range(4):
+            idx = i * 4 + j
+            code = int(codes[idx]) if idx < len(t) else 1  # pad with zero
+            byte |= (code & 0x3) << (6 - j * 2)
+        out[i] = byte
+    return bytes(out), scale
+
+
 def quantize_bf16(tensor: torch.Tensor) -> bytes:
     """Store a float32 tensor as bfloat16 (top 16 bits of each f32 bit pattern).
 
@@ -168,8 +202,13 @@ def serialize(
 
     def add(name: str, tensor: torch.Tensor, *, quantize: bool = False):
         t = tensor.detach().cpu().to(torch.float32)
+        is_ternary_arch = arch.get("arch") == "ternary"
 
-        if quantize and weight_bits == 4:
+        if quantize and is_ternary_arch:
+            raw, scale = quantize_ternary(t)
+            scales_raw = None
+            dtype = "ternary"
+        elif quantize and weight_bits == 4:
             raw, scales = quantize_4bit_grouped(t, group_size=GROUP_SIZE)
             scales_raw = np.array(scales, dtype=np.float32).tobytes()
             dtype = "int4g"
@@ -193,102 +232,94 @@ def serialize(
             "dtype":  dtype,
         }
         if dtype == "int4g":
-            # Store per-group scales as a separate contiguous block after the nibbles
             entry["scales_offset"] = len(buf) + len(raw)
             entry["scales_size"]   = len(scales_raw)
             entry["group_size"]    = GROUP_SIZE
-        elif dtype == "int8":
+        elif dtype in ("int8", "ternary"):
             entry["scale"] = scale
         sections[name] = entry
         buf.extend(raw)
         if scales_raw is not None:
             buf.extend(scales_raw)
 
+    is_ternary = arch.get("arch") == "ternary"
     is_modern  = arch.get("arch") == "modern"
     use_swiglu = arch.get("use_swiglu", True) if is_modern else False
     use_rope   = arch.get("use_rope",   True) if is_modern else False
     use_rmsnorm= arch.get("use_rmsnorm",True) if is_modern else False
     tied       = arch.get("tie_weights",True) if is_modern else False
 
-    add("token_embed", state["token_embed.weight"] * sqrt_d)
-
-    # Positional encoding — RoPE models skip the lookup table
-    if not use_rope:
-        add("pos_embed", state["pos_embed.weight"])
-
-    for li in range(nlayers):
-        pfx = f"enc{li}"
-
-        if is_modern:
-            # Modern: blocks.{li}.norm1/norm2 — RMSNorm has no bias
+    if is_ternary:
+        # TinyTransformerTernary state dict: blocks.{li}.attn.{q/k/v/o}_proj + ff.{w1/w2}
+        add("token_embed", state["token_embed.weight"] * sqrt_d)
+        add("pos_embed",   state["pos_embed.weight"])
+        for li in range(nlayers):
+            pfx = f"enc{li}"
             add(f"{pfx}_ln1_w", state[f"blocks.{li}.norm1.weight"])
-            if not use_rmsnorm:
-                add(f"{pfx}_ln1_b", state[f"blocks.{li}.norm1.bias"])
-            else:
-                # Store zero bias so TS can use same add_vec_f32 path
-                add(f"{pfx}_ln1_b", torch.zeros(d))
+            add(f"{pfx}_ln1_b", state[f"blocks.{li}.norm1.bias"])
             add(f"{pfx}_ln2_w", state[f"blocks.{li}.norm2.weight"])
-            if not use_rmsnorm:
-                add(f"{pfx}_ln2_b", state[f"blocks.{li}.norm2.bias"])
-            else:
-                add(f"{pfx}_ln2_b", torch.zeros(d))
-
-            # Attention: CausalSelfAttention.in_proj / out_proj
-            iw = state[f"blocks.{li}.attn.in_proj.weight"]
-            ib = state[f"blocks.{li}.attn.in_proj.bias"]
-            for sname, start in [("q", 0), ("k", d), ("v", 2 * d)]:
-                add(f"{pfx}_{sname}_weight", iw[start:start + d], quantize=True)
-                add(f"{pfx}_{sname}_bias",   ib[start:start + d])
-            add(f"{pfx}_o_weight", state[f"blocks.{li}.attn.out_proj.weight"], quantize=True)
-            add(f"{pfx}_o_bias",   state[f"blocks.{li}.attn.out_proj.bias"])
-
-            if use_swiglu:
-                # SwiGLU: w1 (gate), w2 (value), w3 (out) — no biases
-                add(f"{pfx}_ff_gate_weight", state[f"blocks.{li}.ff.w1.weight"], quantize=True)
-                add(f"{pfx}_ff_val_weight",  state[f"blocks.{li}.ff.w2.weight"], quantize=True)
-                add(f"{pfx}_ff2_weight",     state[f"blocks.{li}.ff.w3.weight"], quantize=True)
-                # Zero biases for TS compatibility
-                add(f"{pfx}_ff1_bias", torch.zeros(d_ff := state[f"blocks.{li}.ff.w1.weight"].shape[0]))
-                add(f"{pfx}_ff2_bias", torch.zeros(d))
-            else:
-                # ReLU FFN stored under classic names for TS compatibility
-                add(f"{pfx}_ff1_weight", state[f"blocks.{li}.ff.0.weight"], quantize=True)
-                add(f"{pfx}_ff1_bias",   state[f"blocks.{li}.ff.0.bias"])
-                add(f"{pfx}_ff2_weight", state[f"blocks.{li}.ff.2.weight"], quantize=True)
-                add(f"{pfx}_ff2_bias",   state[f"blocks.{li}.ff.2.bias"])
-
-        else:
-            # Classic TinyTransformer
-            ls = f"encoder.layers.{li}"
-            add(f"{pfx}_ln1_w", state[f"{ls}.norm1.weight"])
-            add(f"{pfx}_ln1_b", state[f"{ls}.norm1.bias"])
-            add(f"{pfx}_ln2_w", state[f"{ls}.norm2.weight"])
-            add(f"{pfx}_ln2_b", state[f"{ls}.norm2.bias"])
-
-            iw = state[f"{ls}.self_attn.in_proj_weight"]
-            ib = state[f"{ls}.self_attn.in_proj_bias"]
-            for sname, start in [("q", 0), ("k", d), ("v", 2 * d)]:
-                add(f"{pfx}_{sname}_weight", iw[start:start + d], quantize=True)
-                add(f"{pfx}_{sname}_bias",   ib[start:start + d])
-            add(f"{pfx}_o_weight", state[f"{ls}.self_attn.out_proj.weight"], quantize=True)
-            add(f"{pfx}_o_bias",   state[f"{ls}.self_attn.out_proj.bias"])
-
-            add(f"{pfx}_ff1_weight", state[f"{ls}.linear1.weight"], quantize=True)
-            add(f"{pfx}_ff1_bias",   state[f"{ls}.linear1.bias"])
-            add(f"{pfx}_ff2_weight", state[f"{ls}.linear2.weight"], quantize=True)
-            add(f"{pfx}_ff2_bias",   state[f"{ls}.linear2.bias"])
-
-    add("lnf_w", state["ln_final.weight"])
-    if not (is_modern and use_rmsnorm):
-        add("lnf_b", state["ln_final.bias"])
+            add(f"{pfx}_ln2_b", state[f"blocks.{li}.norm2.bias"])
+            for sname, key in [("q","q_proj"),("k","k_proj"),("v","v_proj"),("o","o_proj")]:
+                add(f"{pfx}_{sname}_weight", state[f"blocks.{li}.attn.{key}.weight"], quantize=True)
+                add(f"{pfx}_{sname}_bias",   state[f"blocks.{li}.attn.{key}.bias"])
+            add(f"{pfx}_ff1_weight", state[f"blocks.{li}.ff.w1.weight"], quantize=True)
+            add(f"{pfx}_ff1_bias",   state[f"blocks.{li}.ff.w1.bias"])
+            add(f"{pfx}_ff2_weight", state[f"blocks.{li}.ff.w2.weight"], quantize=True)
+            add(f"{pfx}_ff2_bias",   state[f"blocks.{li}.ff.w2.bias"])
+        add("lnf_w",       state["ln_final.weight"])
+        add("lnf_b",       state["ln_final.bias"])
+        add("head_weight", state["token_embed.weight"])  # tied, unscaled for head projection
     else:
-        add("lnf_b", torch.zeros(d))
+        add("token_embed", state["token_embed.weight"] * sqrt_d)
+        if not use_rope:
+            add("pos_embed", state["pos_embed.weight"])
 
-    # Head weight — tied models share token_embed, store separately for TS
-    if tied:
-        add("head_weight", state["token_embed.weight"])
-    else:
-        add("head_weight", state["head.weight"])
+        for li in range(nlayers):
+            pfx = f"enc{li}"
+            if is_modern:
+                add(f"{pfx}_ln1_w", state[f"blocks.{li}.norm1.weight"])
+                add(f"{pfx}_ln1_b", state[f"blocks.{li}.norm1.bias"] if not use_rmsnorm else torch.zeros(d))
+                add(f"{pfx}_ln2_w", state[f"blocks.{li}.norm2.weight"])
+                add(f"{pfx}_ln2_b", state[f"blocks.{li}.norm2.bias"] if not use_rmsnorm else torch.zeros(d))
+                iw = state[f"blocks.{li}.attn.in_proj.weight"]
+                ib = state[f"blocks.{li}.attn.in_proj.bias"]
+                for sname, start in [("q", 0), ("k", d), ("v", 2 * d)]:
+                    add(f"{pfx}_{sname}_weight", iw[start:start + d], quantize=True)
+                    add(f"{pfx}_{sname}_bias",   ib[start:start + d])
+                add(f"{pfx}_o_weight", state[f"blocks.{li}.attn.out_proj.weight"], quantize=True)
+                add(f"{pfx}_o_bias",   state[f"blocks.{li}.attn.out_proj.bias"])
+                if use_swiglu:
+                    add(f"{pfx}_ff_gate_weight", state[f"blocks.{li}.ff.w1.weight"], quantize=True)
+                    add(f"{pfx}_ff_val_weight",  state[f"blocks.{li}.ff.w2.weight"], quantize=True)
+                    add(f"{pfx}_ff2_weight",     state[f"blocks.{li}.ff.w3.weight"], quantize=True)
+                    add(f"{pfx}_ff1_bias", torch.zeros(state[f"blocks.{li}.ff.w1.weight"].shape[0]))
+                    add(f"{pfx}_ff2_bias", torch.zeros(d))
+                else:
+                    add(f"{pfx}_ff1_weight", state[f"blocks.{li}.ff.0.weight"], quantize=True)
+                    add(f"{pfx}_ff1_bias",   state[f"blocks.{li}.ff.0.bias"])
+                    add(f"{pfx}_ff2_weight", state[f"blocks.{li}.ff.2.weight"], quantize=True)
+                    add(f"{pfx}_ff2_bias",   state[f"blocks.{li}.ff.2.bias"])
+            else:
+                ls = f"encoder.layers.{li}"
+                add(f"{pfx}_ln1_w", state[f"{ls}.norm1.weight"])
+                add(f"{pfx}_ln1_b", state[f"{ls}.norm1.bias"])
+                add(f"{pfx}_ln2_w", state[f"{ls}.norm2.weight"])
+                add(f"{pfx}_ln2_b", state[f"{ls}.norm2.bias"])
+                iw = state[f"{ls}.self_attn.in_proj_weight"]
+                ib = state[f"{ls}.self_attn.in_proj_bias"]
+                for sname, start in [("q", 0), ("k", d), ("v", 2 * d)]:
+                    add(f"{pfx}_{sname}_weight", iw[start:start + d], quantize=True)
+                    add(f"{pfx}_{sname}_bias",   ib[start:start + d])
+                add(f"{pfx}_o_weight", state[f"{ls}.self_attn.out_proj.weight"], quantize=True)
+                add(f"{pfx}_o_bias",   state[f"{ls}.self_attn.out_proj.bias"])
+                add(f"{pfx}_ff1_weight", state[f"{ls}.linear1.weight"], quantize=True)
+                add(f"{pfx}_ff1_bias",   state[f"{ls}.linear1.bias"])
+                add(f"{pfx}_ff2_weight", state[f"{ls}.linear2.weight"], quantize=True)
+                add(f"{pfx}_ff2_bias",   state[f"{ls}.linear2.bias"])
+
+        add("lnf_w", state["ln_final.weight"])
+        add("lnf_b", state["ln_final.bias"] if not (is_modern and use_rmsnorm) else torch.zeros(d))
+        add("head_weight", state["token_embed.weight"] if tied else state["head.weight"])
 
     bin_path = Path(f"{out_prefix}.bin")
     json_path = Path(f"{out_prefix}.json")

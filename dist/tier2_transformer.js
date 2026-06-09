@@ -88,7 +88,9 @@ function makeMatmulDispatch(api, sec, base) {
     return (wName, bPtr, inp, out, inD, outD) => {
         const s = sec[wName];
         const wPtr = S(wName);
-        if (s.dtype === 'int8')
+        if (s.dtype === 'ternary')
+            api.matmul_ternary(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        else if (s.dtype === 'int8')
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int4')
             api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);

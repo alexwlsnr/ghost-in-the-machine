@@ -1,9 +1,10 @@
 /// Tier 2.5 Wasm Kernel -- Float Transformer
 ///
-/// Supports three weight formats:
-///   - matmul_f32w:  fp32 weights (current production path)
-///   - matmul_8bit:  i8 weights + per-tensor scale (57MB for Specter)
-///   - matmul_4bit:  4-bit packed weights + per-tensor scale (28MB for Specter)
+/// Supports four weight formats:
+///   - matmul_f32w:     fp32 weights (current production path)
+///   - matmul_8bit:     i8 weights + per-tensor scale
+///   - matmul_4bit:     4-bit packed weights + per-tensor scale
+///   - matmul_ternary:  2-bit ternary weights (4 per byte) + per-tensor scale
 ///
 /// 4-bit packing convention (matches py/serialize.py):
 ///   Each byte stores 2 weights as 4-bit offset-binary.
@@ -470,5 +471,49 @@ pub unsafe extern "C" fn matmul_f32w_simd(
         }
 
         out[o] = sum;
+    }
+}
+
+// --- Ternary matmul ---
+//
+// Packing layout produced by py/serialize.py quantize_ternary():
+//   4 ternary codes per byte, high bits first (2 bits each)
+//   code 0b00 (-1): negative  → subtract scale * input[i]
+//   code 0b01 ( 0): zero      → no-op
+//   code 0b10 (+1): positive  → add scale * input[i]
+//   code 0b11:      unused, treated as zero
+
+#[no_mangle]
+pub unsafe extern "C" fn matmul_ternary(
+    weights: *const u8,
+    scale: f32,
+    biases: *const f32,
+    input: *const f32,
+    output: *mut f32,
+    in_dim: i32,
+    out_dim: i32,
+) {
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let n_bytes = (in_dim * out_dim + 3) / 4;
+    let weight_bytes = core::slice::from_raw_parts(weights, n_bytes);
+    let bias_slice   = core::slice::from_raw_parts(biases,  out_dim);
+    let input_slice  = core::slice::from_raw_parts(input,   in_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    for o in 0..out_dim {
+        let mut sum = bias_slice[o];
+        for i in 0..in_dim {
+            let flat     = o * in_dim + i;
+            let byte_idx = flat / 4;
+            let shift    = 6 - (flat % 4) * 2;   // high bits first
+            let code     = (weight_bytes[byte_idx] >> shift) & 0x3;
+            match code {
+                0 => sum -= scale * input_slice[i],  // -1
+                2 => sum += scale * input_slice[i],  // +1
+                _ => {}                               //  0 (codes 1 and 3)
+            }
+        }
+        output_slice[o] = sum;
     }
 }
