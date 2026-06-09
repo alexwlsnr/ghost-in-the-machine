@@ -544,6 +544,22 @@ export class GPUEngine {
     device.queue.writeBuffer(this.wkvPBuf,   0, new Uint32Array([pos, d]));
     device.queue.writeBuffer(this.attnPBuf,  0, new Uint32Array([seqLen, nh, dh, d]));
 
+    // ── DEBUG: submit embed in a separate encoder, read back xBuf ──────────
+    if (pos === 0) {
+      device.pushErrorScope('validation');
+      const e1 = device.createCommandEncoder();
+      this._passEmbed(e1);
+      e1.copyBufferToBuffer(this.xBuf, 0, this.stagBuf, 0, 8 * 4); // first 8 floats
+      device.queue.submit([e1.finish()]);
+      const embedErr = await device.popErrorScope();
+      if (embedErr) console.error('[gpu] embed validation error:', embedErr.message);
+      await this.stagBuf.mapAsync(GPU_MAP_READ);
+      const xSample = Array.from(new Float32Array(this.stagBuf.getMappedRange().slice(0, 32)));
+      this.stagBuf.unmap();
+      console.log('[gpu] xBuf[0..7] after embed:', xSample.map(v => isNaN(v) ? 'NaN' : v.toFixed(4)));
+    }
+    // ── END DEBUG ──────────────────────────────────────────────────────────
+
     const enc = device.createCommandEncoder();
 
     // 1. Token + positional embedding → xBuf
