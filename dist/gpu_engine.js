@@ -349,9 +349,11 @@ export class GPUEngine {
         this.lnPBuf = uniformU32(device, [d]);
         this.addPBuf = uniformU32(device, [d]);
         this.reluPBuf = uniformU32(device, [ff]);
-        this.matQKVOPBuf = uniformU32(device, [d, d, gs, 1]); // [in, out, gs, has_bias]
-        this.matFF1PBuf = uniformU32(device, [ff, d, gs, 1]); // NOTE: shader P = {in,out,gs,hb}
-        this.matFF2PBuf = uniformU32(device, [d, ff, gs, 1]);
+        // Shader struct P = { in_dim, out_dim, group_size, has_bias }
+        // FF1 weight is [d_ff, d] (out=d_ff, in=d); FF2 weight is [d, d_ff] (out=d, in=d_ff)
+        this.matQKVOPBuf = uniformU32(device, [d, d, gs, 1]); // in=d,  out=d
+        this.matFF1PBuf = uniformU32(device, [d, ff, gs, 1]); // in=d,  out=d_ff
+        this.matFF2PBuf = uniformU32(device, [ff, d, gs, 1]); // in=d_ff, out=d
         this.headPBuf = uniformU32(device, [d, arch.vocab_size, 0]);
         // Zero bias stub (head projection has no bias; we pass this to satisfy the binding)
         this.zeroBuf = device.createBuffer({ size: 4, usage: BU_STORAGE });
