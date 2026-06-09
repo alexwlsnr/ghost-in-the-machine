@@ -66,26 +66,34 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const mem8 = new Uint8Array(mem.buffer);
     const bin8 = new Uint8Array(binBuf);
     mem8.set(bin8, base);
-    // Load-time sparse conversion for ternary models:
-    // Build pos/neg index lists in Wasm memory once; inference uses gather-and-add
-    // (no per-weight multiply, no zero processing). Other model types unaffected.
+    // Load-time sparse conversion for ternary models.
+    // CRITICAL: sparse buffers must live AFTER the forward-pass scratch area.
+    // The forward() ba() allocator starts at base+binSize and grows upward —
+    // placing sparse buffers there would cause the scratch to overwrite them.
+    // Layout: [model binary][forward scratch margin][sparse index lists]
     const sparseBuffers = new Map();
     if (api.ternary_convert_to_sparse) {
-        let sparseBase = base + binSize;
+        // Compute worst-case total sparse size so we can grow memory once
+        let totalSparseBytes = 0;
+        for (const s of Object.values(sec)) {
+            if (s.dtype !== 'ternary')
+                continue;
+            const [outD, inD] = s.shape;
+            totalSparseBytes += outD * 2 * 4 + outD * inD * 4 + 16; // counts + worst-case pos+neg + align
+        }
+        // Sparse area starts after model binary AND forward scratch — no overlap possible
+        let sparseBase = base + binSize + margin;
         sparseBase = (sparseBase + 15) & ~15;
+        const sparseEnd = sparseBase + totalSparseBytes;
+        const curPages2 = mem.buffer.byteLength / 65536;
+        const needPages2 = Math.ceil(sparseEnd / 65536);
+        if (needPages2 > curPages2)
+            mem.grow(needPages2 - curPages2);
         for (const [name, s] of Object.entries(sec)) {
             if (s.dtype !== 'ternary')
                 continue;
             const [outD, inD] = s.shape;
-            const maxNonZero = outD * inD; // worst case: no zeros
-            const bytesNeeded = outD * 2 * 4 // counts: 2×u32 per row
-                + maxNonZero * 2 // pos indices: u16
-                + maxNonZero * 2; // neg indices: u16
-            // Ensure Wasm memory is large enough
-            const needed = sparseBase + bytesNeeded;
-            const cur = mem.buffer.byteLength;
-            if (needed > cur)
-                mem.grow(Math.ceil((needed - cur) / 65536));
+            const maxNonZero = outD * inD;
             const countsPtr = sparseBase;
             const posPtr = countsPtr + outD * 2 * 4;
             const negPtr = posPtr + maxNonZero * 2;
