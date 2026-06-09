@@ -6,7 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Ghost in the Machine — Tier 2.5</title>
+<title>Ghost in the Machine</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
 
@@ -110,16 +111,16 @@
 
   #legacy-btn {
     font-family: 'VT323', 'Courier New', monospace;
-    font-size: 15px;
-    padding: 4px 10px;
+    font-size: 16px;
+    padding: 4px 12px;
     background: transparent;
-    border: 1px solid #33ff3322;
-    color: #33ff3344;
+    border: 1px solid #33ff3333;
+    color: #33ff3366;
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.1s, color 0.1s, border-color 0.1s;
   }
-  #legacy-btn:hover { background: #33ff3308; color: #33ff3388; border-color: #33ff3333; }
+  #legacy-btn:hover { background: #33ff3311; color: #33ff3399; border-color: #33ff3355; }
 
   #legacy-menu {
     display: none;
@@ -127,10 +128,11 @@
     right: 0;
     top: calc(100% + 4px);
     background: #0d1a0d;
-    border: 1px solid #33ff3333;
-    min-width: 200px;
+    border: 1px solid #33ff3344;
+    min-width: 220px;
     z-index: 100;
     padding: 4px 0;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6);
   }
   #legacy-menu.open { display: block; }
 
@@ -138,18 +140,18 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 5px 14px;
+    padding: 7px 16px;
     font-family: 'VT323', 'Courier New', monospace;
-    font-size: 17px;
-    color: #33ff3366;
+    font-size: 20px;
+    color: #33ff3388;
     cursor: pointer;
-    gap: 12px;
+    gap: 16px;
     white-space: nowrap;
   }
-  .legacy-item:hover { background: #33ff3311; color: #33ff33; }
+  .legacy-item:hover { background: #33ff3314; color: #33ff33; }
   .legacy-item.active { color: #33ff33; background: #33ff3311; }
   .legacy-item.loading { color: #ffaa00; cursor: default; }
-  .legacy-item-size { font-size: 13px; color: #33ff3333; }
+  .legacy-item-size { font-size: 15px; color: #33ff3366; flex-shrink: 0; }
 
   /* Progress bar inside loading chip */
   .chip-progress {
@@ -361,9 +363,17 @@
     #model-switcher::-webkit-scrollbar { display: none; }
 
     .model-chip { font-size: 16px; padding: 3px 10px; }
-    #legacy-btn { font-size: 13px; padding: 3px 8px; }
-    #legacy-menu { min-width: 160px; }
-    .legacy-item { font-size: 15px; padding: 4px 10px; }
+    #legacy-btn { font-size: 14px; padding: 3px 9px; }
+    /* Dropdown anchors to viewport bottom on small screens to avoid clipping */
+    #legacy-menu {
+      min-width: 180px;
+      right: 0;
+      /* On narrow screens open downward but clamp to viewport */
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    .legacy-item { font-size: 17px; padding: 8px 12px; }
+    .legacy-item-size { font-size: 13px; }
 
     /* Terminal */
     #terminal {
@@ -564,7 +574,7 @@ function renderSwitcher() {
       chip.className = 'model-chip' + (reg.id === activeId ? ' active' : ' available-unloaded');
       chip.textContent = reg.name.toUpperCase();
       chip.title = reg.description || '';
-      if (reg.id !== activeId && !isSwitching) chip.addEventListener('click', () => switchModel(reg.id));
+      if (reg.id !== activeId) chip.addEventListener('click', () => switchModel(reg.id));
     }
     switcher.insertBefore(chip, legacySpacer);
   }
