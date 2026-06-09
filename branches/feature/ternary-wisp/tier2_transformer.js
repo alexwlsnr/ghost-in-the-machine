@@ -66,7 +66,35 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const mem8 = new Uint8Array(mem.buffer);
     const bin8 = new Uint8Array(binBuf);
     mem8.set(bin8, base);
-    return { api, manifest: manifest.architecture, sec, base };
+    // Load-time sparse conversion for ternary models:
+    // Build pos/neg index lists in Wasm memory once; inference uses gather-and-add
+    // (no per-weight multiply, no zero processing). Other model types unaffected.
+    const sparseBuffers = new Map();
+    if (api.ternary_convert_to_sparse) {
+        let sparseBase = base + binSize;
+        sparseBase = (sparseBase + 15) & ~15;
+        for (const [name, s] of Object.entries(sec)) {
+            if (s.dtype !== 'ternary')
+                continue;
+            const [outD, inD] = s.shape;
+            const maxNonZero = outD * inD; // worst case: no zeros
+            const bytesNeeded = outD * 2 * 4 // counts: 2×u32 per row
+                + maxNonZero * 2 // pos indices: u16
+                + maxNonZero * 2; // neg indices: u16
+            // Ensure Wasm memory is large enough
+            const needed = sparseBase + bytesNeeded;
+            const cur = mem.buffer.byteLength;
+            if (needed > cur)
+                mem.grow(Math.ceil((needed - cur) / 65536));
+            const countsPtr = sparseBase;
+            const posPtr = countsPtr + outD * 2 * 4;
+            const negPtr = posPtr + maxNonZero * 2;
+            api.ternary_convert_to_sparse(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
+            sparseBuffers.set(name, { countsPtr, posPtr, negPtr });
+            sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
+        }
+    }
+    return { api, manifest: manifest.architecture, sec, base, sparseBuffers };
 }
 export function encode(text) {
     const t = [];
@@ -80,17 +108,22 @@ export function encode(text) {
 // ─── Matmul dispatch ───────────────────────────────────────────────
 // Routes weight matmul to the correct kernel based on section dtype.
 // Biases are always fp32. Head weight stays fp32 (mixed-precision layout).
-function makeMatmulDispatch(api, sec, base) {
+function makeMatmulDispatch(api, sec, base, sparseBuffers) {
     const S = (name) => base + sec[name].offset;
-    // Use SIMD matmul for fp32 if the SIMD kernel was loaded (it exports matmul_f32w_simd).
-    // Falls back transparently to the scalar matmul_f32w on non-SIMD builds.
     const fp32mw = api.matmul_f32w_simd ?? api.matmul_f32w;
     const ternaryMw = api.matmul_ternary_simd ?? api.matmul_ternary;
     return (wName, bPtr, inp, out, inD, outD) => {
         const s = sec[wName];
         const wPtr = S(wName);
-        if (s.dtype === 'ternary')
-            ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        if (s.dtype === 'ternary') {
+            const sp = sparseBuffers?.get(wName);
+            if (sp && api.matmul_ternary_sparse) {
+                api.matmul_ternary_sparse(sp.countsPtr, sp.posPtr, sp.negPtr, s.scale ?? 1.0, bPtr, inp, out, outD);
+            }
+            else {
+                ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+            }
+        }
         else if (s.dtype === 'int8')
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int4')
@@ -136,14 +169,14 @@ function getRoPE(dHead, maxLen) {
         ropeCache.set(key, precomputeRoPE(dHead, maxLen));
     return ropeCache.get(key);
 }
-export function forward(api, sec, arch, tokens, base) {
+export function forward(api, sec, arch, tokens, base, sparseBuffers) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
     const useRope = !!arch.use_rope;
     const useSwiglu = !!arch.use_swiglu;
     const useRmsnorm = !!arch.use_rmsnorm;
     // Section pointer helper: actual address = base + manifest offset
     const S = (name) => base + sec[name].offset;
-    const mw = makeMatmulDispatch(api, sec, base);
+    const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
     let off = base;
     for (const s of Object.values(sec)) {
         const end = base + s.offset + s.size + (s.scales_size ?? 0);
@@ -267,14 +300,14 @@ export function createCache(model) {
  * On entry: cache.length === pos
  * On exit:  cache.length === pos + 1
  */
-function forwardIncremental(api, sec, arch, token, pos, base, cache) {
+function forwardIncremental(api, sec, arch, token, pos, base, cache, sparseBuffers) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
     const mem = api.memory;
     const useRope = !!arch.use_rope;
     const useSwiglu = !!arch.use_swiglu;
     const useRmsnorm = !!arch.use_rmsnorm;
     const S = (name) => base + sec[name].offset;
-    const mw = makeMatmulDispatch(api, sec, base);
+    const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
     const rope = useRope ? getRoPE(dh, arch.max_len) : null;
     let off = base;
     for (const s of Object.values(sec)) {
@@ -396,11 +429,11 @@ function forwardIncremental(api, sec, arch, token, pos, base, cache) {
  * Returns the logits for the last prompt position (seeds the first sampled token).
  * cache.length will equal tokens.length after this returns.
  */
-function prefill(api, sec, arch, tokens, base, cache) {
+function prefill(api, sec, arch, tokens, base, cache, sparseBuffers) {
     cache.length = 0;
     let logits;
     for (let p = 0; p < tokens.length; p++) {
-        logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache);
+        logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache, sparseBuffers);
     }
     return logits;
 }
@@ -517,7 +550,8 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     // -- Cached path ----------------------------------------------------
     if (cache !== undefined) {
         cache.length = 0;
-        let logits = prefill(api, sec, arch, tokens, base, cache);
+        const sp = model.sparseBuffers;
+        let logits = prefill(api, sec, arch, tokens, base, cache, sp);
         for (let s = 0; s < maxNew; s++) {
             if (cache.length >= win) {
                 yield { char: '', token: PAD, done: true };
@@ -531,7 +565,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
             }
             generated.push(next);
             yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
-            logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
+            logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
         }
         yield { char: '', token: PAD, done: true };
         return;
