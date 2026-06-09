@@ -41,10 +41,12 @@ jobs:
         working-directory: ts
         run: |
           npm install
-          npx tsc -p tsconfig.transformer.json
+          npx tsc -p tsconfig.json
 
       - name: Copy TS output to dist
-        run: cp ts/dist/tier2_transformer.js dist/
+        run: |
+          cp ts/dist/tier2_transformer.js dist/
+          cp ts/dist/gpu_engine.js dist/
 
       - name: Verify dist contents
         run: ls -lh dist/
