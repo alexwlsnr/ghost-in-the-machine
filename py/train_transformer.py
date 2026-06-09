@@ -754,6 +754,12 @@ def train_transformer(
                 'architecture': {
                     'type': 'tiny_transformer',
                     'arch': 'modern' if isinstance(model, TinyTransformerModern) else 'classic',
+                    # Save individual modern flags so loaders don't need to infer from state dict
+                    **({'use_rope':     model.use_rope,
+                        'use_swiglu':   any(hasattr(b.ff, 'w1') for b in model.blocks),
+                        'use_rmsnorm':  isinstance(model.blocks[0].norm1, RMSNorm),
+                        'tie_weights':  model.head.weight is model.token_embed.weight,
+                       } if isinstance(model, TinyTransformerModern) else {}),
                     'vocab_size': model.vocab_size,
                     'd_model': model.d_model,
                     'n_heads': model.n_heads,
