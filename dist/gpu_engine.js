@@ -434,20 +434,44 @@ export class GPUEngine {
         device.queue.writeBuffer(this.embedPBuf, 0, new Uint32Array([token, pos, d]));
         device.queue.writeBuffer(this.wkvPBuf, 0, new Uint32Array([pos, d]));
         device.queue.writeBuffer(this.attnPBuf, 0, new Uint32Array([seqLen, nh, dh, d]));
-        // ── DEBUG: submit embed in a separate encoder, read back xBuf ──────────
+        // ── DEBUG: run layer 0 step-by-step to find NaN source ─────────────────
         if (pos === 0) {
-            device.pushErrorScope('validation');
-            const e1 = device.createCommandEncoder();
-            this._passEmbed(e1);
-            e1.copyBufferToBuffer(this.xBuf, 0, this.stagBuf, 0, 8 * 4); // first 8 floats
-            device.queue.submit([e1.finish()]);
-            const embedErr = await device.popErrorScope();
-            if (embedErr)
-                console.error('[gpu] embed validation error:', embedErr.message);
-            await this.stagBuf.mapAsync(GPU_MAP_READ);
-            const xSample = Array.from(new Float32Array(this.stagBuf.getMappedRange().slice(0, 32)));
-            this.stagBuf.unmap();
-            console.log('[gpu] xBuf[0..7] after embed:', xSample.map(v => isNaN(v) ? 'NaN' : v.toFixed(4)));
+            const dbg = async (label, buf, enc) => {
+                if (enc) {
+                    device.queue.submit([enc.finish()]);
+                }
+                const cp = device.createCommandEncoder();
+                cp.copyBufferToBuffer(buf, 0, this.stagBuf, 0, 8 * 4);
+                device.queue.submit([cp.finish()]);
+                await this.stagBuf.mapAsync(GPU_MAP_READ);
+                const vals = Array.from(new Float32Array(this.stagBuf.getMappedRange().slice(0, 32)));
+                this.stagBuf.unmap();
+                const hasNaN = vals.some(isNaN);
+                console.log(`[gpu] ${label}:`, hasNaN ? 'NaN!' : vals.slice(0, 4).map(v => v.toFixed(3)).join(', '));
+            };
+            // Embed
+            let e = device.createCommandEncoder();
+            this._passEmbed(e);
+            await dbg('xBuf after embed', this.xBuf, e);
+            // LN1 of layer 0
+            e = device.createCommandEncoder();
+            this._passLN(e, this.xBuf, this.ln1w[0], this.ln1b[0], this.lnBuf);
+            await dbg('lnBuf after LN1[0]', this.lnBuf, e);
+            // Q matmul of layer 0
+            e = device.createCommandEncoder();
+            this._passMat(e, this.qT[0], this.lnBuf, this.qBuf);
+            await dbg('qBuf after Q-mat[0]', this.qBuf, e);
+            // K and V (write to cache)
+            e = device.createCommandEncoder();
+            this._passMat(e, this.kT[0], this.lnBuf, this.kvBuf);
+            this._passWKV(e, this.kvBuf, this.kCache[0]);
+            this._passMat(e, this.vT[0], this.lnBuf, this.kvBuf);
+            this._passWKV(e, this.kvBuf, this.vCache[0]);
+            await dbg('kvBuf after V-mat[0]', this.kvBuf, e);
+            // Attention
+            e = device.createCommandEncoder();
+            this._passAttn(e, 0);
+            await dbg('attnBuf after attn[0]', this.attnBuf, e);
         }
         // ── END DEBUG ──────────────────────────────────────────────────────────
         const enc = device.createCommandEncoder();
