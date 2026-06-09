@@ -37,7 +37,7 @@
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 55,
+      "max_new": 120,
       "primary": false,
       "default": false,
       "available": true,
@@ -52,7 +52,7 @@
       "size_mb": 27,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 55,
+      "max_new": 120,
       "default": false,
       "available": true
     },
@@ -101,7 +101,7 @@
       "size_mb": 18,
       "params": "27.6M",
       "ctx": 1024,
-      "max_new": 55,
+      "max_new": 120,
       "default": false,
       "available": true
     },
@@ -191,7 +191,7 @@
       "size_mb": 27.2,
       "available": true,
       "primary": true,
-      "max_new": 55,
+      "max_new": 120,
       "rep_penalty": 1.35,
       "temp": 0.5
     }
