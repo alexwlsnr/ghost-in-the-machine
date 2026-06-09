@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Train TinyTransformerTernary (Wisp-scale) — proper run for cuboid.
-# Run from repo root: bash scripts/train_ternary_wisp.sh
+# Run from anywhere: bash scripts/train_ternary_wisp.sh
 set -euo pipefail
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO"
+mkdir -p ckpt logs
 
 DATASET="${1:-data/wisp_ternary_train.txt}"
 CHECKPOINT="ckpt/wisp_ternary.pt"
