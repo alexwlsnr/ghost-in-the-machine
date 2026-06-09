@@ -478,7 +478,7 @@ export function sampleFromLogits(logits, temp, topK, topP, rand, repPenalty = 1.
     }
     return weighted[weighted.length - 1][0];
 }
-export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0, history) {
+export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0, history, gpuEngine) {
     const { api, manifest: arch, sec, base } = model;
     const win = arch.max_len - 1;
     // Build token sequence — with history if provided, bare query otherwise.
@@ -489,6 +489,28 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
     const REP_WINDOW = 32;
     const generated = [];
+    // -- GPU path -------------------------------------------------------
+    if (gpuEngine !== undefined) {
+        gpuEngine.reset();
+        let logits = await gpuEngine.prefill(tokens);
+        for (let s = 0; s < maxNew; s++) {
+            if (gpuEngine.seqLen >= win) {
+                yield { char: '', token: PAD, done: true };
+                return;
+            }
+            await new Promise((r) => setTimeout(r, 0));
+            const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
+            if (next === EOS || next === PAD) {
+                yield { char: '', token: next, done: true };
+                return;
+            }
+            generated.push(next);
+            yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
+            logits = await gpuEngine.step(next);
+        }
+        yield { char: '', token: PAD, done: true };
+        return;
+    }
     // -- Cached path ----------------------------------------------------
     if (cache !== undefined) {
         cache.length = 0;

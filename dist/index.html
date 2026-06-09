@@ -468,10 +468,12 @@
 // Model weights — versioned so they cache between reloads.
 const _t = Date.now();
 const { loadModel, encode, generate, createCache, detectSIMD, buildContextTokens } = await import('./tier2_transformer.js?t=' + _t);
+const { GPUEngine, shouldUseGPU } = await import('./gpu_engine.js?t=' + _t);
 
 // Detect SIMD support; track whether it's currently enabled (toggleable)
 const simdSupported = await detectSIMD();
 let simdEnabled = simdSupported;
+const gpuAvailable = !!(await navigator.gpu?.requestAdapter().catch(() => null));
 
 function activeWasmFile() {
   return (simdEnabled && simdSupported)
@@ -498,9 +500,10 @@ const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
 // activeId: currently active model id
 let registry   = [];
 let modelCache = {};
-let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
-let histories  = {};   // id → Turn[] — conversation history per model
-let memoryOn   = false; // off by default — multi-turn training needs more data before enabling
+let kvCaches   = {};      // id → KVCache — one per loaded model, reused across queries
+let gpuEngines = {};      // id → GPUEngine | null — GPU engine per model (null if not eligible)
+let histories  = {};      // id → Turn[] — conversation history per model
+let memoryOn   = false;   // off by default — multi-turn training needs more data before enabling
 let activeId   = null;
 let isSwitching = false;
 
@@ -534,7 +537,9 @@ function setInputEnabled(enabled) {
 // ── Status bar ────────────────────────────────────────────────────────────
 function updateStatusBar(reg) {
   if (!reg) { modelInfo.textContent = '---'; return; }
-  modelInfo.textContent = `${reg.name.toUpperCase()} · ${reg.params} params · ${reg.ctx} ctx`;
+  const gpu = reg && gpuEngines[reg.id];
+  const kernel = gpu ? '⚡ WebGPU' : (simdEnabled && simdSupported ? '⚡ SIMD' : 'Wasm');
+  modelInfo.textContent = `${reg.name.toUpperCase()} · ${reg.params} params · ${reg.ctx} ctx · ${kernel}`;
 }
 
 // ── Model switcher chips ───────────────────────────────────────────────────
@@ -648,6 +653,17 @@ async function switchModel(id) {
     reg._loading = false;
     activeId = id;
 
+    // Try to create GPU engine for eligible models
+    if (gpuAvailable && shouldUseGPU(loaded.manifest)) {
+      loadingText.textContent = 'Initialising GPU engine...';
+      gpuEngines[id] = await GPUEngine.create(
+        loaded.manifest, loaded.sec, loaded.api.memory, loaded.base
+      ).catch(e => { console.warn('WebGPU init failed:', e); return null; });
+      console.log('[gpu]', id, gpuEngines[id] ? 'GPU engine ready ⚡' : 'GPU unavailable, falling back to Wasm');
+    } else {
+      gpuEngines[id] = null;
+    }
+
     loadingFill.style.width = '100%';
     loadingText.textContent = 'Ready.';
 
@@ -723,14 +739,15 @@ async function boot() {
     const prev = activeId;
     modelCache = {};
     kvCaches   = {};
+    gpuEngines = {};
     activeId   = null;  // clear so switchModel doesn't treat it as already-loaded
     appendLine(`KERNEL: switching to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading...`, 'boot');
     if (prev) switchModel(prev);
   });
 
   // Boot message
-  appendLine('GHOST IN THE MACHINE v2.5 (build 16)', 'ready');
-  appendLine(`Kernel: WebAssembly${simdSupported ? ' + SIMD128 ⚡' : ' (scalar)'}`, 'boot');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 17)', 'ready');
+  appendLine(`Kernel: WebAssembly${simdSupported ? ' + SIMD128 ⚡' : ' (scalar)'}${gpuAvailable ? ' · WebGPU available ⚡' : ''}`, 'boot');
   appendLine('Byte-level Tiny Transformer | Multi-model registry', 'boot');
   appendLine('', 'boot');
   appendLine('SELECT MODEL:', 'boot');
@@ -765,6 +782,16 @@ async function boot() {
     kvCaches[defaultModel.id]   = createCache(loaded);
     defaultModel._loading = false;
     activeId = defaultModel.id;
+
+    // Try GPU engine for eligible models
+    if (gpuAvailable && shouldUseGPU(loaded.manifest)) {
+      loadingText.textContent = 'Initialising GPU engine...';
+      gpuEngines[defaultModel.id] = await GPUEngine.create(
+        loaded.manifest, loaded.sec, loaded.api.memory, loaded.base
+      ).catch(e => { console.warn('WebGPU init failed:', e); return null; });
+    } else {
+      gpuEngines[defaultModel.id] = null;
+    }
 
     loadingFill.style.width = '100%';
     loadingText.textContent = 'Ready.';
@@ -847,7 +874,8 @@ input.addEventListener('keydown', async (e) => {
   try {
     // Larger models on longer contexts can ramble — cap response length per model
     const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 80 : 160);
-    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
+    const gpu = gpuEngines[activeId] || undefined;
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : kvCaches[activeId], 0, 1.0, history, gpu)) {
       if (step.done) break;
 
       // Replace thinking indicator with response on first token
