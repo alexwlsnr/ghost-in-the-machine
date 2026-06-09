@@ -1,0 +1,15 @@
+{
+  "epoch": 85,
+  "epochs_total": 200,
+  "train_loss": 2.824505,
+  "val_loss": 2.761099,
+  "best_val_loss": 0.5107,
+  "best_epoch": 65,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3682410,
+  "checkpoint": "ckpt/spec512_v2.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-09T06:38:33Z",
+  "started_at": "2026-06-08T19:19:45Z"
+}
