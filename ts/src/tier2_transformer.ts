@@ -2,8 +2,10 @@
  * Tier 2.5 Ghost Transformer — Float32 Orchestrator (fixed lengths)
  */
 
-interface SectionDef { offset: number; size: number; shape: number[]; dtype: string; scale?: number; scales_offset?: number; scales_size?: number; group_size?: number; }
-interface Arch { vocab_size: number; d_model: number; n_heads: number; n_layers: number; d_ff: number; max_len: number;
+import type { GPUEngine } from './gpu_engine.js';
+
+export interface SectionDef { offset: number; size: number; shape: number[]; dtype: string; scale?: number; scales_offset?: number; scales_size?: number; group_size?: number; }
+export interface Arch { vocab_size: number; d_model: number; n_heads: number; n_layers: number; d_ff: number; max_len: number;
   // Modern architecture flags (absent = false / classic)
   arch?: string; use_rope?: boolean; use_swiglu?: boolean; use_rmsnorm?: boolean; }
 
@@ -568,6 +570,7 @@ export async function* generate(
   prompt: string, maxNew = 160, temp = 0.8, rand: () => number = Math.random,
   cache?: KVCache, topK = 0, topP = 1.0,
   history?: Turn[],
+  gpuEngine?: GPUEngine,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
   const win = arch.max_len - 1;
@@ -580,6 +583,24 @@ export async function* generate(
   const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
   const REP_WINDOW = 32;
   const generated: number[] = [];
+
+  // -- GPU path -------------------------------------------------------
+  if (gpuEngine !== undefined) {
+    gpuEngine.reset();
+    let logits = await gpuEngine.prefill(tokens);
+    for (let s = 0; s < maxNew; s++) {
+      if (gpuEngine.seqLen >= win) { yield { char: '', token: PAD, done: true }; return; }
+      await new Promise((r) => setTimeout(r, 0));
+      const next = sampleFromLogits(logits, temp, topK, topP, rand,
+                                     repPenalty, generated.slice(-REP_WINDOW));
+      if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+      generated.push(next);
+      yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
+      logits = await gpuEngine.step(next);
+    }
+    yield { char: '', token: PAD, done: true };
+    return;
+  }
 
   // -- Cached path ----------------------------------------------------
   if (cache !== undefined) {
