@@ -11,7 +11,8 @@
       "ctx": 128,
       "primary": true,
       "default": true,
-      "available": true
+      "available": true,
+      "temp": 0.8
     },
     {
       "id": "shade-compact",
@@ -24,7 +25,8 @@
       "ctx": 128,
       "primary": true,
       "default": false,
-      "available": true
+      "available": true,
+      "temp": 1.0
     },
     {
       "id": "spec512-v1.1",
@@ -38,7 +40,8 @@
       "max_new": 55,
       "primary": true,
       "default": false,
-      "available": true
+      "available": true,
+      "temp": 0.5
     },
     {
       "id": "spec512",
@@ -186,9 +189,10 @@
       "ctx": "256",
       "size_mb": 1.6,
       "available": true,
-      "primary": false,
+      "primary": true,
       "max_new": 80,
-      "rep_penalty": 1.15
+      "rep_penalty": 1.15,
+      "temp": 0.4
     }
   ]
 }
