@@ -25,6 +25,18 @@
       "available": true
     },
     {
+      "id": "wisp-optimal",
+      "name": "Wisp Optimal",
+      "description": "~5M params \u00b7 4.7MB \u00b7 modern arch + more data \u00b7 val_loss 0.613",
+      "bin": "model_wisp_optimal_8bit.bin",
+      "json": "model_wisp_optimal_8bit.json",
+      "size_mb": 4.7,
+      "params": "~5M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
       "id": "shade-fp32",
       "name": "Shade fp32",
       "description": "10.9M params \u00b7 42MB \u00b7 reference",
