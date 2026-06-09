@@ -609,3 +609,88 @@ pub unsafe extern "C" fn matmul_ternary_simd(
             + f32x4_extract_lane::<3>(acc);
     }
 }
+
+// --- Sparse ternary matmul (load-time conversion) ---
+//
+// Convert packed 2-bit ternary weights to CSR-style sparse index lists.
+// Called once at model load time — never during inference.
+//
+// counts_out: [pos_count_0, neg_count_0, pos_count_1, neg_count_1, ...] as u32
+// pos_out:    flat array of positive column indices (u16), all rows concat'd
+// neg_out:    flat array of negative column indices (u16), all rows concat'd
+
+#[no_mangle]
+pub unsafe extern "C" fn ternary_convert_to_sparse(
+    weights:    *const u8,
+    counts_out: *mut u32,
+    pos_out:    *mut u16,
+    neg_out:    *mut u16,
+    in_dim:     i32,
+    out_dim:    i32,
+) {
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let bytes_per_row = (in_dim + 3) / 4;
+    let weight_bytes = core::slice::from_raw_parts(weights, out_dim * bytes_per_row);
+    let counts_slice = core::slice::from_raw_parts_mut(counts_out, out_dim * 2);
+
+    let mut pos_off = 0usize;
+    let mut neg_off = 0usize;
+
+    for o in 0..out_dim {
+        let mut pc = 0u32;
+        let mut nc = 0u32;
+        let flat_row_start = o * in_dim;
+
+        for i in 0..in_dim {
+            let flat  = flat_row_start + i;
+            let byte  = weight_bytes[flat / 4];
+            let shift = 6 - (flat % 4) * 2;
+            let code  = (byte >> shift) & 0x3;
+            match code {
+                2 => { *pos_out.add(pos_off) = i as u16; pos_off += 1; pc += 1; }
+                0 => { *neg_out.add(neg_off) = i as u16; neg_off += 1; nc += 1; }
+                _ => {}
+            }
+        }
+
+        counts_slice[o * 2]     = pc;
+        counts_slice[o * 2 + 1] = nc;
+    }
+}
+
+// Sparse ternary matrix-vector multiply.
+// counts: [pos_count_0, neg_count_0, pos_count_1, neg_count_1, ...] as u32
+// pos/neg: flat index arrays produced by ternary_convert_to_sparse
+// output[o] = scale * (sum_pos(input[i]) - sum_neg(input[i])) + bias[o]
+
+#[no_mangle]
+pub unsafe extern "C" fn matmul_ternary_sparse(
+    counts:  *const u32,   // 2 × out_dim entries
+    pos:     *const u16,   // positive column indices
+    neg:     *const u16,   // negative column indices
+    scale:   f32,
+    biases:  *const f32,
+    input:   *const f32,
+    output:  *mut f32,
+    out_dim: i32,
+) {
+    let out_dim = out_dim as usize;
+    let counts_slice = core::slice::from_raw_parts(counts, out_dim * 2);
+    let bias_slice   = core::slice::from_raw_parts(biases, out_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    let mut pos_off = 0usize;
+    let mut neg_off = 0usize;
+
+    for o in 0..out_dim {
+        let pc = counts_slice[o * 2]     as usize;
+        let nc = counts_slice[o * 2 + 1] as usize;
+        let mut sum = 0.0f32;
+        for j in 0..pc { sum += *input.add(*pos.add(pos_off + j) as usize); }
+        for j in 0..nc { sum -= *input.add(*neg.add(neg_off + j) as usize); }
+        output_slice[o] = sum * scale + bias_slice[o];
+        pos_off += pc;
+        neg_off += nc;
+    }
+}

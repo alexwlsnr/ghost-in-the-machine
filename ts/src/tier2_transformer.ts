@@ -13,6 +13,8 @@ interface WasmApi {
   memory: WebAssembly.Memory;
   matmul_ternary(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   matmul_ternary_simd(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
+  matmul_ternary_sparse(counts: number, pos: number, neg: number, scale: number, b: number, inp: number, out: number, outD: number): void;
+  ternary_convert_to_sparse(w: number, counts: number, pos: number, neg: number, inD: number, outD: number): void;
   matmul_f32w(w: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   softmax_f32(p: number, n: number): void;
   softmax_causal_f32(p: number, s: number): void;
@@ -99,7 +101,36 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
   const mem8 = new Uint8Array(mem.buffer);
   const bin8 = new Uint8Array(binBuf);
   mem8.set(bin8, base);
-  return { api, manifest: manifest.architecture, sec, base };
+
+  // Load-time sparse conversion for ternary models:
+  // Build pos/neg index lists in Wasm memory once; inference uses gather-and-add
+  // (no per-weight multiply, no zero processing). Other model types unaffected.
+  const sparseBuffers = new Map<string, { countsPtr: number; posPtr: number; negPtr: number }>();
+  if (api.ternary_convert_to_sparse) {
+    let sparseBase = base + binSize;
+    sparseBase = (sparseBase + 15) & ~15;
+    for (const [name, s] of Object.entries(sec) as [string, SectionDef][]) {
+      if (s.dtype !== 'ternary') continue;
+      const [outD, inD] = s.shape;
+      const maxNonZero = outD * inD;            // worst case: no zeros
+      const bytesNeeded = outD * 2 * 4          // counts: 2×u32 per row
+                        + maxNonZero * 2         // pos indices: u16
+                        + maxNonZero * 2;        // neg indices: u16
+      // Ensure Wasm memory is large enough
+      const needed = sparseBase + bytesNeeded;
+      const cur = mem.buffer.byteLength;
+      if (needed > cur) mem.grow(Math.ceil((needed - cur) / 65536));
+
+      const countsPtr = sparseBase;
+      const posPtr    = countsPtr + outD * 2 * 4;
+      const negPtr    = posPtr    + maxNonZero * 2;
+      api.ternary_convert_to_sparse(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
+      sparseBuffers.set(name, { countsPtr, posPtr, negPtr });
+      sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
+    }
+  }
+
+  return { api, manifest: manifest.architecture, sec, base, sparseBuffers };
 }
 
 export function encode(text: string): number[] {
@@ -114,17 +145,26 @@ export function encode(text: string): number[] {
 // ─── Matmul dispatch ───────────────────────────────────────────────
 // Routes weight matmul to the correct kernel based on section dtype.
 // Biases are always fp32. Head weight stays fp32 (mixed-precision layout).
-function makeMatmulDispatch(api: WasmApi, sec: Record<string, SectionDef>, base: number) {
+function makeMatmulDispatch(
+  api: WasmApi,
+  sec: Record<string, SectionDef>,
+  base: number,
+  sparseBuffers?: Map<string, { countsPtr: number; posPtr: number; negPtr: number }>,
+) {
   const S = (name: string) => base + sec[name].offset;
-  // Use SIMD matmul for fp32 if the SIMD kernel was loaded (it exports matmul_f32w_simd).
-  // Falls back transparently to the scalar matmul_f32w on non-SIMD builds.
-  const fp32mw     = (api as any).matmul_f32w_simd     ?? api.matmul_f32w;
-  const ternaryMw  = (api as any).matmul_ternary_simd  ?? api.matmul_ternary;
+  const fp32mw    = (api as any).matmul_f32w_simd ?? api.matmul_f32w;
+  const ternaryMw = (api as any).matmul_ternary_simd ?? api.matmul_ternary;
   return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
     const s = sec[wName];
     const wPtr = S(wName);
-    if (s.dtype === 'ternary')       ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-    else if (s.dtype === 'int8')     api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    if (s.dtype === 'ternary') {
+      const sp = sparseBuffers?.get(wName);
+      if (sp && api.matmul_ternary_sparse) {
+        api.matmul_ternary_sparse(sp.countsPtr, sp.posPtr, sp.negPtr, s.scale ?? 1.0, bPtr, inp, out, outD);
+      } else {
+        ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+      }
+    } else if (s.dtype === 'int8')   api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4')     api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4g')    api.matmul_4bit_grouped(wPtr, base + s.scales_offset!, bPtr, inp, out, inD, outD, s.group_size ?? 32);
     else if (s.dtype === 'bfloat16') api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
@@ -168,7 +208,9 @@ function getRoPE(dHead: number, maxLen: number) {
   return ropeCache.get(key)!;
 }
 
-export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
+type SparseMap = Map<string, { countsPtr: number; posPtr: number; negPtr: number }>;
+
+export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number, sparseBuffers?: SparseMap): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
   const useRope    = !!arch.use_rope;
   const useSwiglu  = !!arch.use_swiglu;
@@ -176,7 +218,7 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
 
   // Section pointer helper: actual address = base + manifest offset
   const S = (name: string) => base + sec[name].offset;
-  const mw = makeMatmulDispatch(api, sec, base);
+  const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
 
   let off = base;
   for (const s of Object.values(sec)) {
@@ -331,6 +373,7 @@ function forwardIncremental(
   pos: number,
   base: number,
   cache: KVCache,
+  sparseBuffers?: SparseMap,
 ): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
   const mem = api.memory;
@@ -338,7 +381,7 @@ function forwardIncremental(
   const useSwiglu  = !!arch.use_swiglu;
   const useRmsnorm = !!arch.use_rmsnorm;
   const S = (name: string) => base + sec[name].offset;
-  const mw = makeMatmulDispatch(api, sec, base);
+  const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
   const rope = useRope ? getRoPE(dh, arch.max_len) : null;
 
   let off = base;
@@ -473,11 +516,12 @@ function prefill(
   tokens: number[],
   base: number,
   cache: KVCache,
+  sparseBuffers?: SparseMap,
 ): Float32Array {
   cache.length = 0;
   let logits!: Float32Array;
   for (let p = 0; p < tokens.length; p++) {
-    logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache);
+    logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache, sparseBuffers);
   }
   return logits;
 }
@@ -609,7 +653,8 @@ export async function* generate(
   // -- Cached path ----------------------------------------------------
   if (cache !== undefined) {
     cache.length = 0;
-    let logits = prefill(api, sec, arch, tokens, base, cache);
+    const sp = (model as any).sparseBuffers as SparseMap | undefined;
+    let logits = prefill(api, sec, arch, tokens, base, cache, sp);
     for (let s = 0; s < maxNew; s++) {
       if (cache.length >= win) { yield { char: '', token: PAD, done: true }; return; }
       await new Promise((r) => setTimeout(r, 0));
@@ -618,7 +663,7 @@ export async function* generate(
       if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
       generated.push(next);
       yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
-      logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
+      logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
     }
     yield { char: '', token: PAD, done: true };
     return;
