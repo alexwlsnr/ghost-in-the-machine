@@ -1,0 +1,15 @@
+{
+  "epoch": 41,
+  "epochs_total": 300,
+  "train_loss": 0.208277,
+  "val_loss": 0.900374,
+  "best_val_loss": 0.607236,
+  "best_epoch": 11,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3825465,
+  "checkpoint": "ckpt/shade_winner_large.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-08T22:55:52Z",
+  "started_at": "2026-06-08T22:39:09Z"
+}

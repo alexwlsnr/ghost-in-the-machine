@@ -1,0 +1,41 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:801: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 2637 training items (0 multi-turn)
+Device: cuda
+Training on 2637 pairs, 800 epochs
+Started: 2026-06-08 21:39:24 UTC
+Sequences — train: 2504, val: 132
+Parameters: 4,266,752
+Mixed precision: bf16 autocast enabled
+  [21:39:31] Epoch    5/800: loss=1.6550, acc=0.496, val_loss=1.5238
+  [21:39:36] Epoch   10/800: loss=1.4245, acc=0.560, val_loss=1.3234
+  [21:39:42] Epoch   15/800: loss=1.2992, acc=0.597, val_loss=1.3181
+  [21:39:47] Epoch   20/800: loss=1.2034, acc=0.623, val_loss=1.1741
+  [21:39:53] Epoch   25/800: loss=1.1584, acc=0.636, val_loss=1.1316
+  [21:39:58] Epoch   30/800: loss=1.0904, acc=0.651, val_loss=1.1053
+  [21:40:03] Epoch   35/800: loss=1.0487, acc=0.665, val_loss=1.1159
+  [21:40:09] Epoch   40/800: loss=0.9943, acc=0.679, val_loss=1.1226
+  [21:40:14] Epoch   45/800: loss=0.9630, acc=0.687, val_loss=1.1171
+  [21:40:19] Epoch   50/800: loss=0.9430, acc=0.693, val_loss=1.1044
+  [21:40:25] Epoch   55/800: loss=0.9680, acc=0.686, val_loss=1.0895
+  [21:40:30] Epoch   60/800: loss=0.8833, acc=0.711, val_loss=1.1246
+  [21:40:35] Epoch   65/800: loss=0.8392, acc=0.722, val_loss=1.1390
+  [21:40:41] Epoch   70/800: loss=0.8132, acc=0.731, val_loss=1.1538
+  [21:40:46] Epoch   75/800: loss=0.7847, acc=0.739, val_loss=1.1287
+  [21:40:51] Epoch   80/800: loss=0.7668, acc=0.744, val_loss=1.1540
+
+Early stop at epoch 84 (no val improvement for 40 epochs)
+
+Finished: 2026-06-08 21:40:56 UTC
+Best acc: 0.683 at epoch 44
+
+Sample generations:
+  HELLO                → HEY THERE!
+  HOW ARE YOU          → HEY THERE! NOT MUCH HERE. YOU NEEDED TO DO IT.
+  TELL ME A JOKE       → WHAT KIND OF HELP DO?
+  WHO ARE YOU          → I CAN GENERATE  BOOKING IN THE RAIN AND COMFORTABL
+  THANKS               → SOUNDS GOOD IDEASON IT. I'M GLAD WE COULDN'T HURT 

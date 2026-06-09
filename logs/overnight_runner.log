@@ -1,0 +1,85 @@
+[21:58:39] shade_modern_all done
+[21:58:39] Starting shade_modern_arch...
+[22:11:13] shade_modern_arch done — best_val_loss=0.5795
+[22:11:13] Starting shade_classic_mask...
+[22:26:56] shade_classic_mask done — best_val_loss=0.6579
+[22:26:56] Starting wisp_modern_nomask...
+[22:28:04] wisp_modern_nomask done — best_val_loss=0.9682
+[22:28:04] Starting wisp_swiglu_rmsnorm...
+[22:29:34] wisp_swiglu_rmsnorm done — best_val_loss=1.2006
+[22:29:34] Starting wisp_shade_data...
+[22:38:42] wisp_shade_data done — best_val_loss=0.6129
+[22:38:42] Phase 1 winner: shade_modern_arch (val=0.579517) — running on larger dataset
+[22:38:42] Starting shade_winner_large...
+[22:55:54] shade_winner_large done — best_val_loss=0.6072
+[22:55:54] Starting shade_compact_swiglu...
+[23:06:37] shade_compact_swiglu done — best_val_loss=0.6511
+[23:06:37] Starting shade_plus...
+[23:36:57] shade_plus done — best_val_loss=0.6675
+[23:36:57] Running comprehensive deep eval...
+Loading shade_clean...
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Done — val_loss=0.5963, epoch=186
+Loading shade_modern_all...
+  Done — val_loss=0.6420, epoch=11
+Loading shade_modern_arch...
+  Done — val_loss=0.5795, epoch=10
+Loading shade_classic_mask...
+  Done — val_loss=0.6579, epoch=29
+Loading shade_winner_large...
+  Done — val_loss=0.6072, epoch=11
+Loading shade_compact_swiglu...
+  Done — val_loss=0.6511, epoch=11
+Loading shade_plus...
+  Done — val_loss=0.6675, epoch=24
+Loading wisp_v2_fixed...
+Traceback (most recent call last):
+  File "/home/alex/dev/ai/micro-llm/tier2/py/deep_eval.py", line 226, in <module>
+    main()
+    ~~~~^^
+  File "/home/alex/dev/ai/micro-llm/tier2/py/deep_eval.py", line 208, in main
+    print(f"  Done — val_loss={val_loss:.4f}, epoch={epoch}", file=sys.stderr)
+                              ^^^^^^^^^^^^^^
+TypeError: unsupported format string passed to NoneType.__format__
+[23:38:11] Deep eval complete → logs/modern_arch_eval.md
+[23:38:11] === SUMMARY ===
+  shade_clean                    best=0.5963  ep=186  state=early_stopped
+  shade_modern_all               best=0.6420  ep=11  state=early_stopped
+  shade_modern_arch              best=0.5795  ep=10  state=early_stopped
+  shade_classic_mask             best=0.6579  ep=29  state=early_stopped
+  shade_winner_large             best=0.6072  ep=11  state=early_stopped
+  shade_compact_swiglu           best=0.6511  ep=11  state=early_stopped
+  shade_plus                     best=0.6675  ep=24  state=early_stopped
+  wisp_v2_fixed: no log
+  wisp_modern                    best=1.0841  ep=44  state=early_stopped
+  wisp_modern_nomask             best=0.9682  ep=22  state=early_stopped
+  wisp_swiglu_rmsnorm            best=1.2006  ep=44  state=early_stopped
+  wisp_shade_data                best=0.6129  ep=21  state=early_stopped
+[23:38:11] Overnight run complete.
+[23:38:11] Starting shade_modern_arch_lowlr...
+[23:53:15] shade_modern_arch_lowlr done — best_val_loss=0.589
+[23:53:15] shade_modern_arch_lowlr done — best_val_loss=0.589
+[23:53:19] Main runner done. Starting sequel experiments.
+[23:53:19] Starting shade_modern_arch_lowlr...
+Loading shade_clean...
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Done — val_loss=0.5963, epoch=186
+Loading shade_modern_arch...
+  Done — val_loss=0.5795, epoch=10
+Loading shade_modern_arch_lowlr...
+  Done — val_loss=0.6599, epoch=3
+Loading shade_winner_large...
+  Done — val_loss=0.6072, epoch=11
+Loading shade_compact...
+  Done — val_loss=0.5886, epoch=10
+Loading wisp_v2_fixed...
+Traceback (most recent call last):
+  File "/home/alex/dev/ai/micro-llm/tier2/py/deep_eval.py", line 226, in <module>
+    main()
+    ~~~~^^
+  File "/home/alex/dev/ai/micro-llm/tier2/py/deep_eval.py", line 208, in main
+    print(f"  Done — val_loss={val_loss:.4f}, epoch={epoch}", file=sys.stderr)
+                              ^^^^^^^^^^^^^^
+TypeError: unsupported format string passed to NoneType.__format__

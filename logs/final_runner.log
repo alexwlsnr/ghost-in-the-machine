@@ -1,0 +1,24 @@
+[23:54:27] Starting shade_compact...
+[23:54:27] shade_compact done
+Loading shade_clean...
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+  Done — val_loss=0.5963, epoch=186
+Loading shade_modern_arch...
+  Done — val_loss=0.5795, epoch=10
+Loading shade_modern_arch_lowlr...
+  Done — val_loss=0.6599, epoch=3
+Loading shade_winner_large...
+  Done — val_loss=0.6072, epoch=11
+Loading shade_compact...
+  Done — val_loss=0.5886, epoch=10
+Loading wisp_v2_fixed...
+Traceback (most recent call last):
+  File "/home/alex/dev/ai/micro-llm/tier2/py/deep_eval.py", line 226, in <module>
+    main()
+    ~~~~^^
+  File "/home/alex/dev/ai/micro-llm/tier2/py/deep_eval.py", line 208, in main
+    print(f"  Done — val_loss={val_loss:.4f}, epoch={epoch}", file=sys.stderr)
+                              ^^^^^^^^^^^^^^
+TypeError: unsupported format string passed to NoneType.__format__
+[23:54:27] Deep eval complete -> logs/modern_arch_eval.md

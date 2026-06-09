@@ -1,0 +1,36 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 400 epochs
+Started: 2026-06-08 23:54:28 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 4,299,520
+Mixed precision: bf16 autocast enabled
+  [23:55:22] Epoch    5/400: loss=0.7054, acc=0.775, val_loss=0.6904
+  [23:56:16] Epoch   10/400: loss=0.5823, acc=0.810, val_loss=0.6343
+  [23:57:10] Epoch   15/400: loss=0.5114, acc=0.830, val_loss=0.6288
+  [23:58:03] Epoch   20/400: loss=0.4567, acc=0.846, val_loss=0.6423
+  [23:58:57] Epoch   25/400: loss=0.4117, acc=0.859, val_loss=0.6658
+  [23:59:50] Epoch   30/400: loss=0.3740, acc=0.871, val_loss=0.7024
+  [00:00:43] Epoch   35/400: loss=0.3421, acc=0.881, val_loss=0.7257
+  [00:01:37] Epoch   40/400: loss=0.3149, acc=0.889, val_loss=0.7737
+  [00:02:30] Epoch   45/400: loss=0.2924, acc=0.897, val_loss=0.8088
+  [00:03:23] Epoch   50/400: loss=0.2729, acc=0.903, val_loss=0.8431
+  [00:04:17] Epoch   55/400: loss=0.2576, acc=0.908, val_loss=0.8787
+
+Early stop at epoch 55 (no val improvement for 40 epochs)
+
+Finished: 2026-06-09 00:04:17 UTC
+Best acc: 0.830 at epoch 15
+
+Sample generations:
+  HELLO                → H HUMAN! I'M READY TO CHAT WITH YOU. WHAT CAN GHOS
+  HOW ARE YOU          → I AM DIFFERENT GETTING BEFORED THANKMY CIRCUITS CH
+  TELL ME A JOKE       → WHY DID THE BREAD CROSS THE ROAD? TO GET TO THE OT
+  WHO ARE YOU          → I AM A LITTLE BYTE-SIZED ASSISTANT READY TO CHAT W
+  THANKS               → YOU THAT IS. I'M REALLY HAPPY THAT I COULD FIND IT

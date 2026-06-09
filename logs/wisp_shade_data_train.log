@@ -1,0 +1,35 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 300 epochs
+Started: 2026-06-08 22:29:34 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 4,299,520
+Mixed precision: bf16 autocast enabled
+  [22:30:29] Epoch    5/300: loss=0.8430, acc=0.732, val_loss=0.8090
+  [22:31:23] Epoch   10/300: loss=0.6508, acc=0.789, val_loss=0.6499
+  [22:32:16] Epoch   15/300: loss=0.5583, acc=0.816, val_loss=0.6177
+  [22:33:10] Epoch   20/300: loss=0.5018, acc=0.832, val_loss=0.6163
+  [22:34:03] Epoch   25/300: loss=0.4608, acc=0.844, val_loss=0.6215
+  [22:34:57] Epoch   30/300: loss=0.4277, acc=0.854, val_loss=0.6345
+  [22:35:50] Epoch   35/300: loss=0.3996, acc=0.862, val_loss=0.6482
+  [22:36:43] Epoch   40/300: loss=0.3764, acc=0.869, val_loss=0.6641
+  [22:37:37] Epoch   45/300: loss=0.3562, acc=0.876, val_loss=0.6844
+  [22:38:30] Epoch   50/300: loss=0.3393, acc=0.881, val_loss=0.7033
+
+Early stop at epoch 51 (no val improvement for 30 epochs)
+
+Finished: 2026-06-08 22:38:41 UTC
+Best acc: 0.834 at epoch 21
+
+Sample generations:
+  HELLO                → HEY HELLO THERE! IT'S WONDERFUL TO MEET YOU! HOW M
+  HOW ARE YOU          → I AM DOING GHOST AND I AM CODELED AND WAND DOCTED 
+  TELL ME A JOKE       → WHY DID THE BONE CROSS THE ROAD? TO GET TO THE OTH
+  WHO ARE YOU          → I AM A FRIENDLY AI FRIENDLY AI ASSSISTANT!
+  THANKS               → EREARDO, CAN YOU TELL ME WHAT I CAN DO? THAT'S THE

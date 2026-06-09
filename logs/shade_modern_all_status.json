@@ -1,0 +1,15 @@
+{
+  "epoch": 41,
+  "epochs_total": 300,
+  "train_loss": 0.112137,
+  "val_loss": 1.091253,
+  "best_val_loss": 0.642019,
+  "best_epoch": 11,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3790883,
+  "checkpoint": "ckpt/shade_modern_all.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-08T21:58:33Z",
+  "started_at": "2026-06-08T21:45:43Z"
+}

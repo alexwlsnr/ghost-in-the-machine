@@ -1,0 +1,33 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 300 epochs
+Started: 2026-06-08 21:58:39 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 14,269,056
+Mixed precision: bf16 autocast enabled
+  [22:00:15] Epoch    5/300: loss=0.6137, acc=0.800, val_loss=0.6175
+  [22:01:48] Epoch   10/300: loss=0.4838, acc=0.837, val_loss=0.5795
+  [22:03:22] Epoch   15/300: loss=0.3896, acc=0.865, val_loss=0.5997
+  [22:04:56] Epoch   20/300: loss=0.3161, acc=0.888, val_loss=0.6593
+  [22:06:31] Epoch   25/300: loss=0.2642, acc=0.906, val_loss=0.7162
+  [22:08:05] Epoch   30/300: loss=0.2279, acc=0.918, val_loss=0.7760
+  [22:09:38] Epoch   35/300: loss=0.2030, acc=0.927, val_loss=0.8245
+  [22:11:12] Epoch   40/300: loss=0.1847, acc=0.934, val_loss=0.8642
+
+Early stop at epoch 40 (no val improvement for 30 epochs)
+
+Finished: 2026-06-08 22:11:12 UTC
+Best acc: 0.837 at epoch 10
+
+Sample generations:
+  HELLO                → HI HUMAN! I AM GHOST, IT'S WONDERFUL TO MEET YOU. 
+  HOW ARE YOU          → II AM FEELING QUITE BRIGHT AND READY TO CHAT WITH 
+  TELL ME A JOKE       → WHY DID THE BACTERIA CROSS THE ROAD? TO GET TO THE
+  WHO ARE YOU          → HELLO HUMAN! I'M FUNCTIONAL AND READY TO CHAT! HOW
+  THANKS               → I'M REALLY EXCITED TO START MY COLLEGE CAREER.

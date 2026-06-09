@@ -1,0 +1,33 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 300 epochs
+Started: 2026-06-08 21:45:22 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 14,269,056
+Mixed precision: bf16 autocast enabled
+  [21:47:00] Epoch    5/300: loss=0.7057, acc=0.774, val_loss=0.6968
+  [21:48:36] Epoch   10/300: loss=0.5347, acc=0.823, val_loss=0.6453
+  [21:50:12] Epoch   15/300: loss=0.4069, acc=0.861, val_loss=0.6668
+  [21:51:48] Epoch   20/300: loss=0.2997, acc=0.895, val_loss=0.7452
+  [21:53:26] Epoch   25/300: loss=0.2212, acc=0.921, val_loss=0.8523
+  [21:55:02] Epoch   30/300: loss=0.1711, acc=0.939, val_loss=0.9453
+  [21:56:38] Epoch   35/300: loss=0.1386, acc=0.951, val_loss=1.0159
+  [21:58:14] Epoch   40/300: loss=0.1160, acc=0.959, val_loss=1.0730
+
+Early stop at epoch 41 (no val improvement for 30 epochs)
+
+Finished: 2026-06-08 21:58:33 UTC
+Best acc: 0.831 at epoch 11
+
+Sample generations:
+  HELLO                → HELLOO HUMAN! I'M HERE AND READY TO CHAT! WHAT'S O
+  HOW ARE YOU          → I AM DOING SMART PER CLOUDS READY TO HELP HUMAN WI
+  TELL ME A JOKE       → WHY DID THE BONE GO TO THE PARTY? BECAUSE THEY HAD
+  WHO ARE YOU          → I AM A TINY BYTE-LEVEL ASSISTANT NAMED GHOST, HUMA
+  THANKS               → YOUR DAY IS JUST AS HAPPY TO CHAT WITH YOU TODAY!

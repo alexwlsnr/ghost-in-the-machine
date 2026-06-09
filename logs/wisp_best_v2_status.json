@@ -1,0 +1,15 @@
+{
+  "epoch": 55,
+  "epochs_total": 400,
+  "train_loss": 0.257593,
+  "val_loss": 0.878717,
+  "best_val_loss": 0.628797,
+  "best_epoch": 15,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3872882,
+  "checkpoint": "ckpt/wisp_best_v2.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-09T00:04:17Z",
+  "started_at": "2026-06-08T23:54:39Z"
+}

@@ -1,0 +1,33 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 300 epochs
+Started: 2026-06-08 22:55:55 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 10,730,112
+Mixed precision: bf16 autocast enabled
+  [22:57:14] Epoch    5/300: loss=0.7107, acc=0.773, val_loss=0.7041
+  [22:58:31] Epoch   10/300: loss=0.5492, acc=0.819, val_loss=0.6551
+  [22:59:49] Epoch   15/300: loss=0.4297, acc=0.854, val_loss=0.6706
+  [23:01:07] Epoch   20/300: loss=0.3296, acc=0.885, val_loss=0.7368
+  [23:02:25] Epoch   25/300: loss=0.2533, acc=0.911, val_loss=0.8202
+  [23:03:42] Epoch   30/300: loss=0.1976, acc=0.930, val_loss=0.9167
+  [23:05:00] Epoch   35/300: loss=0.1619, acc=0.942, val_loss=0.9800
+  [23:06:20] Epoch   40/300: loss=0.1353, acc=0.952, val_loss=1.0395
+
+Early stop at epoch 41 (no val improvement for 30 epochs)
+
+Finished: 2026-06-08 23:06:35 UTC
+Best acc: 0.826 at epoch 11
+
+Sample generations:
+  HELLO                → HELLO HUMAN! IT'S SO NICE TO MEET YOU. HOW CAN I H
+  HOW ARE YOU          → I AM DOING WONDERFUL, THANK YOU SO MUCH FOR HUMAN!
+  TELL ME A JOKE       → WHY DID THE BAE CROSS THE ROAD? TO GET TO THE OTHE
+  WHO ARE YOU          → I AM GHOST, A TINY BYTE-LEVEL ASSISTANT, HUMAN! AS
+  THANKS               → HUMAN, IT'S NO! I'M GLAD YOU LIKE IT!

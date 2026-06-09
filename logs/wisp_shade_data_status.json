@@ -1,0 +1,15 @@
+{
+  "epoch": 51,
+  "epochs_total": 300,
+  "train_loss": 0.335542,
+  "val_loss": 0.701488,
+  "best_val_loss": 0.61293,
+  "best_epoch": 21,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3820201,
+  "checkpoint": "ckpt/wisp_shade_data.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-08T22:38:41Z",
+  "started_at": "2026-06-08T22:29:46Z"
+}

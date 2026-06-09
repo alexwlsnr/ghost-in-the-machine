@@ -1,0 +1,15 @@
+{
+  "epoch": 3,
+  "epochs_total": 400,
+  "train_loss": 0.691366,
+  "val_loss": 0.65989,
+  "best_val_loss": 0.65989,
+  "best_epoch": 3,
+  "stopped_early": false,
+  "state": "running",
+  "pid": 3871333,
+  "checkpoint": "ckpt/shade_modern_arch_lowlr.pt",
+  "eta_seconds": 7488,
+  "updated_at": "2026-06-08T23:54:17Z",
+  "started_at": "2026-06-08T23:38:31Z"
+}
