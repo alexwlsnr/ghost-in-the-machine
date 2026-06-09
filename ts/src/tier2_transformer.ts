@@ -521,12 +521,25 @@ export interface Step { char: string; token: number; done: boolean; }
  * Sample a token index from logits with temperature + optional top-k / top-p.
  * topK=0 / topP=1.0 → pure temperature (default, backward-compatible).
  * Recommended for Shade/Specter: topK=40, topP=0.9.
+ *
+ * repPenalty > 1.0 penalises tokens that appeared in recentTokens by dividing
+ * their logit by the penalty before softmax. 1.3 is subtle, 1.5 is aggressive.
  */
 export function sampleFromLogits(
   logits: Float32Array, temp: number, topK: number, topP: number,
   rand: () => number,
+  repPenalty = 1.0, recentTokens: number[] = [],
 ): number {
   const n = logits.length;
+
+  // Repetition penalty: divide logits of recently-seen tokens
+  if (repPenalty > 1.0 && recentTokens.length > 0) {
+    const seen = new Set(recentTokens);
+    for (const tok of seen) {
+      if (tok < n) logits[tok] /= repPenalty;
+    }
+  }
+
   const pairs: [number, number][] = Array.from({ length: n }, (_, i) => [i, logits[i]]);
   pairs.sort((a, b) => b[1] - a[1]);
   const k = topK > 0 ? Math.min(topK, n) : n;
@@ -563,6 +576,11 @@ export async function* generate(
     ? buildContextTokens(history, prompt, win)
     : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
 
+  // Repetition penalty: 1.35 for larger models (ctx≥512), 1.15 subtle for small ones
+  const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
+  const REP_WINDOW = 32;
+  const generated: number[] = [];
+
   // -- Cached path ----------------------------------------------------
   if (cache !== undefined) {
     cache.length = 0;
@@ -570,8 +588,10 @@ export async function* generate(
     for (let s = 0; s < maxNew; s++) {
       if (cache.length >= win) { yield { char: '', token: PAD, done: true }; return; }
       await new Promise((r) => setTimeout(r, 0));
-      const next = sampleFromLogits(logits, temp, topK, topP, rand);
+      const next = sampleFromLogits(logits, temp, topK, topP, rand,
+                                     repPenalty, generated.slice(-REP_WINDOW));
       if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+      generated.push(next);
       yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
       logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
     }
@@ -584,8 +604,10 @@ export async function* generate(
     if (tokens.length >= win) { yield { char: '', token: PAD, done: true }; return; }
     await new Promise((r) => setTimeout(r, 0));
     const logits = forward(api, sec, arch, tokens, base);
-    const next = sampleFromLogits(logits, temp, topK, topP, rand);
+    const next = sampleFromLogits(logits, temp, topK, topP, rand,
+                                   repPenalty, generated.slice(-REP_WINDOW));
     if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+    generated.push(next);
     tokens.push(next);
     yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
   }
