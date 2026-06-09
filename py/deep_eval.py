@@ -96,6 +96,12 @@ def load_model(checkpoint_path: str):
     is_modern = arch.get('arch', 'classic') == 'modern'
 
     if is_modern:
+        # Detect flags from state dict since they aren't always in the arch dict
+        state = ckpt['model_state']
+        use_rope    = 'pos_embed.weight' not in state  # no pos_embed → RoPE
+        use_swiglu  = any('ff.w1' in k for k in state)
+        use_rmsnorm = not any('norm1.bias' in k for k in state)
+        tie_weights = 'head.weight' not in state
         model = TinyTransformerModern(
             vocab_size=arch['vocab_size'],
             d_model=arch['d_model'],
@@ -103,6 +109,10 @@ def load_model(checkpoint_path: str):
             n_layers=arch['n_layers'],
             d_ff=arch['d_ff'],
             max_len=arch['max_len'],
+            use_rope=use_rope,
+            use_swiglu=use_swiglu,
+            use_rmsnorm=use_rmsnorm,
+            tie_weights=tie_weights,
         )
     else:
         model = TinyTransformer(
