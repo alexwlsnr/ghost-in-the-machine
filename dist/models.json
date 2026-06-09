@@ -73,6 +73,30 @@
       "available": true
     },
     {
+      "id": "shade-compact",
+      "name": "Shade Compact",
+      "description": "~11M params \u00b7 11MB \u00b7 modern arch compact FFN \u00b7 val_loss 0.589",
+      "bin": "model_shade_compact_8bit.bin",
+      "json": "model_shade_compact_8bit.json",
+      "size_mb": 11,
+      "params": "~11M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "wisp-modern",
+      "name": "Wisp Modern",
+      "description": "~5M params \u00b7 4.6MB \u00b7 modern arch \u00b7 more data \u00b7 val_loss 0.613",
+      "bin": "model_wisp_modern_best_8bit.bin",
+      "json": "model_wisp_modern_best_8bit.json",
+      "size_mb": 4.6,
+      "params": "~5M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
       "id": "shade-4bit",
       "name": "Shade 4-bit",
       "description": "10.9M params \u00b7 6MB \u00b7 grouped quant",
