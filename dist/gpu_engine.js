@@ -233,7 +233,11 @@ function uploadBuf(device, data, usage) {
     return buf;
 }
 function uniformU32(device, values) {
-    return uploadBuf(device, new Uint32Array(values), UN);
+    // Chrome requires uniform buffers to be >= 16 bytes regardless of struct size.
+    // Pad to 4 u32 values minimum; extra bytes are harmless (not read by the shader).
+    const arr = new Uint32Array(Math.max(4, values.length));
+    arr.set(values);
+    return uploadBuf(device, arr, UN);
 }
 function emptyStorageBuf(device, byteSize, extraUsage = 0) {
     return device.createBuffer({ size: (byteSize + 3) & ~3, usage: ST | extraUsage });
@@ -462,6 +466,22 @@ export class GPUEngine {
         await this.stagBuf.mapAsync(GPU_MAP_READ);
         const result = new Float32Array(this.stagBuf.getMappedRange().slice(0));
         this.stagBuf.unmap();
+        // Debug: log logit stats for the first step of each generate call
+        if (pos === 0) {
+            let mn = Infinity, mx = -Infinity, nans = 0;
+            for (let i = 0; i < result.length; i++) {
+                if (isNaN(result[i])) {
+                    nans++;
+                }
+                else {
+                    mn = Math.min(mn, result[i]);
+                    mx = Math.max(mx, result[i]);
+                }
+            }
+            const top3 = Array.from(result).map((v, i) => [i, v])
+                .sort((a, b) => b[1] - a[1]).slice(0, 3);
+            console.log(`[gpu] pos=0 logits: min=${mn.toFixed(3)} max=${mx.toFixed(3)} nans=${nans} top3=`, top3);
+        }
         this._seqLen = seqLen;
         return result;
     }
