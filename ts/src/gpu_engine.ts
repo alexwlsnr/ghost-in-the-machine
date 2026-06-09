@@ -669,19 +669,19 @@ export class GPUEngine {
     pass.end();
   }
 
+  private _timings = { encode: 0, submit: 0, map: 0, read: 0, n: 0 };
+
   private async _step(token: number): Promise<Float32Array> {
     const { device, arch } = this;
     const { d_model: d, n_heads: nh, n_layers: nl, vocab_size: vs } = arch;
     const pos    = this._seqLen;
     const seqLen = pos + 1;
 
-    // Update per-token uniform buffer contents (bind groups reference the buffer
-    // objects, which are stable; only the data inside changes each token)
     device.queue.writeBuffer(this.embedPBuf, 0, new Uint32Array([token, pos, d]));
     device.queue.writeBuffer(this.wkvPBuf,   0, new Uint32Array([pos, d]));
     device.queue.writeBuffer(this.attnPBuf,  0, new Uint32Array([seqLen, nh, d / nh, d]));
 
-    // Encode the full forward pass — no object allocation inside this loop
+    const t0 = performance.now();
     const enc = device.createCommandEncoder();
     this._run(enc, this.embedOp);
     for (let li = 0; li < nl; li++) {
@@ -699,12 +699,24 @@ export class GPUEngine {
     this._run(enc, this.finalLnOp);
     this._run(enc, this.headOp);
     enc.copyBufferToBuffer(this.logBuf, 0, this.stagBuf, 0, vs * 4);
+
+    const t1 = performance.now();
     device.queue.submit([enc.finish()]);
 
-    // Read back 258 logit floats — only CPU↔GPU transfer per token
+    const t2 = performance.now();
     await this.stagBuf.mapAsync(GPU_MAP_READ);
+
+    const t3 = performance.now();
     const result = new Float32Array(this.stagBuf.getMappedRange().slice(0));
     this.stagBuf.unmap();
+    const t4 = performance.now();
+
+    const tm = this._timings;
+    tm.encode += t1 - t0; tm.submit += t3 - t1; tm.map += t4 - t3; tm.n++;
+    if (tm.n === 5) {
+      console.log(`[gpu] avg over 5 tokens — encode:${(tm.encode/5).toFixed(1)}ms  submit+mapAsync:${(tm.submit/5).toFixed(1)}ms  read:${(tm.map/5).toFixed(1)}ms`);
+      tm.encode = tm.submit = tm.map = tm.n = 0;
+    }
 
     this._seqLen = seqLen;
     return result;
