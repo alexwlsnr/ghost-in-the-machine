@@ -234,9 +234,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }`;
 
 // ── Buffer utilities ─────────────────────────────────────────────────────────
-
-const ST = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-const UN = GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST;
+// Use raw WebGPU spec values rather than GPUBufferUsage.* globals — the globals
+// may not exist at module evaluation time in non-WebGPU environments.
+// Values from https://gpuweb.github.io/gpuweb/#buffer-usage
+const BU_COPY_SRC = 0x04;
+const BU_COPY_DST = 0x08;
+const BU_UNIFORM  = 0x40;
+const BU_STORAGE  = 0x80;
+const BU_MAP_READ = 0x01;
+const ST = BU_STORAGE | BU_COPY_DST;         // storage buffer (written from GPU, may copy out)
+const UN = BU_UNIFORM | BU_COPY_DST;         // uniform buffer (written from CPU each token)
+const GPU_MAP_READ = 0x01;                    // GPUMapMode.READ
 
 function uploadBuf(device: GPUDevice, data: ArrayBufferView, usage: GPUBufferUsageFlags): GPUBuffer {
   const buf = device.createBuffer({ size: (data.byteLength + 3) & ~3, usage, mappedAtCreation: true });
@@ -448,7 +456,7 @@ export class GPUEngine {
     this.matFF2PBuf  = uniformU32(device, [d,  ff, gs, 1]);
     this.headPBuf    = uniformU32(device, [d, arch.vocab_size, 0]);
     // Zero bias stub (head projection has no bias; we pass this to satisfy the binding)
-    this.zeroBuf = device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE });
+    this.zeroBuf = device.createBuffer({ size: 4, usage: BU_STORAGE });
 
     // Per-token uniform buffers — placeholder values, updated each step
     this.embedPBuf = uniformU32(device, [0, 0, d]);
@@ -460,7 +468,7 @@ export class GPUEngine {
     const { device } = this;
     const { d_model: d, d_ff: ff, n_layers: nl, max_len: ctx, vocab_size: vs } = arch;
 
-    const act = (n: number) => emptyStorageBuf(device, n * 4, GPUBufferUsage.COPY_SRC);
+    const act = (n: number) => emptyStorageBuf(device, n * 4, BU_COPY_SRC);
     this.xBuf    = act(d);
     this.lnBuf   = act(d);
     this.qBuf    = act(d);
@@ -469,7 +477,7 @@ export class GPUEngine {
     this.ffBuf   = act(ff);
     this.logBuf  = act(vs);
     this.stagBuf = device.createBuffer({
-      size: vs * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+      size: vs * 4, usage: BU_MAP_READ | BU_COPY_DST,
     });
 
     const cacheBytes = ctx * d * 4;
@@ -564,7 +572,7 @@ export class GPUEngine {
     device.queue.submit([enc.finish()]);
 
     // 5. Read back logits (only 258 × 4 = ~1 KB)
-    await this.stagBuf.mapAsync(GPUMapMode.READ);
+    await this.stagBuf.mapAsync(GPU_MAP_READ);
     const result = new Float32Array(this.stagBuf.getMappedRange().slice(0));
     this.stagBuf.unmap();
 
