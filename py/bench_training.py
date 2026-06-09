@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from train_transformer import TinyTransformer, TinyTransformerTernary
 
 WARMUP_STEPS = 5
-BENCH_STEPS  = 20
+BENCH_STEPS  = 50
 
 
 def get_gpu_power_watts() -> float:
