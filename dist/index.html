@@ -6,7 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Ghost in the Machine — Tier 2.5</title>
+<title>Ghost in the Machine</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
 
@@ -564,7 +565,7 @@ function renderSwitcher() {
       chip.className = 'model-chip' + (reg.id === activeId ? ' active' : ' available-unloaded');
       chip.textContent = reg.name.toUpperCase();
       chip.title = reg.description || '';
-      if (reg.id !== activeId && !isSwitching) chip.addEventListener('click', () => switchModel(reg.id));
+      if (reg.id !== activeId) chip.addEventListener('click', () => switchModel(reg.id));
     }
     switcher.insertBefore(chip, legacySpacer);
   }
