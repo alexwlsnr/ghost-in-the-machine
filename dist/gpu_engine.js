@@ -286,7 +286,6 @@ export class GPUEngine {
         this.vCache = [];
         this.layerOps = [];
         this._seqLen = 0;
-        this._timings = { encode: 0, submit: 0, map: 0, read: 0, n: 0 };
         this.device = device;
         this.arch = arch;
         this.pip = pip;
@@ -300,6 +299,12 @@ export class GPUEngine {
         // Classic arch only: no RoPE, no SwiGLU, no RMSNorm
         if (arch.use_rope || arch.use_swiglu || arch.use_rmsnorm)
             return null;
+        // Firefox's wgpu resolves mapAsync on a ~100ms poll interval, making GPU
+        // inference ~10x slower than Wasm. Skip GPU path on Firefox.
+        if (typeof navigator !== 'undefined' && /Firefox/.test(navigator.userAgent)) {
+            console.warn('[gpu] Skipping WebGPU on Firefox — mapAsync latency ~100ms (use Chrome for GPU acceleration)');
+            return null;
+        }
         const gpu = navigator.gpu;
         if (!gpu)
             return null;
@@ -545,7 +550,6 @@ export class GPUEngine {
         device.queue.writeBuffer(this.embedPBuf, 0, new Uint32Array([token, pos, d]));
         device.queue.writeBuffer(this.wkvPBuf, 0, new Uint32Array([pos, d]));
         device.queue.writeBuffer(this.attnPBuf, 0, new Uint32Array([seqLen, nh, d / nh, d]));
-        const t0 = performance.now();
         const enc = device.createCommandEncoder();
         this._run(enc, this.embedOp);
         for (let li = 0; li < nl; li++) {
@@ -568,23 +572,10 @@ export class GPUEngine {
         this._run(enc, this.finalLnOp);
         this._run(enc, this.headOp);
         enc.copyBufferToBuffer(this.logBuf, 0, this.stagBuf, 0, vs * 4);
-        const t1 = performance.now();
         device.queue.submit([enc.finish()]);
-        const t2 = performance.now();
         await this.stagBuf.mapAsync(GPU_MAP_READ);
-        const t3 = performance.now();
         const result = new Float32Array(this.stagBuf.getMappedRange().slice(0));
         this.stagBuf.unmap();
-        const t4 = performance.now();
-        const tm = this._timings;
-        tm.encode += t1 - t0;
-        tm.submit += t3 - t1;
-        tm.map += t4 - t3;
-        tm.n++;
-        if (tm.n === 5) {
-            console.log(`[gpu] avg over 5 tokens — encode:${(tm.encode / 5).toFixed(1)}ms  submit+mapAsync:${(tm.submit / 5).toFixed(1)}ms  read:${(tm.map / 5).toFixed(1)}ms`);
-            tm.encode = tm.submit = tm.map = tm.n = 0;
-        }
         this._seqLen = seqLen;
         return result;
     }
