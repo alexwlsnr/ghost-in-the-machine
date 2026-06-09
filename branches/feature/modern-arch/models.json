@@ -3,7 +3,7 @@
     {
       "id": "wisp-8bit",
       "name": "Wisp",
-      "description": "3.3M params · 3.6MB · instant load",
+      "description": "3.3M params \u00b7 3.6MB \u00b7 instant load",
       "bin": "model_wisp_8bit.bin",
       "json": "model_wisp_8bit.json",
       "size_mb": 3.6,
@@ -15,7 +15,7 @@
     {
       "id": "wisp-fp32",
       "name": "Wisp fp32",
-      "description": "3.3M params · 13MB · reference",
+      "description": "3.3M params \u00b7 13MB \u00b7 reference",
       "bin": "model_wisp_fp32.bin",
       "json": "model_wisp_fp32.json",
       "size_mb": 13,
@@ -27,7 +27,7 @@
     {
       "id": "shade-fp32",
       "name": "Shade fp32",
-      "description": "10.9M params · 42MB · reference",
+      "description": "10.9M params \u00b7 42MB \u00b7 reference",
       "bin": "model_shade_fp32.bin",
       "json": "model_shade_fp32.json",
       "size_mb": 42,
@@ -39,7 +39,7 @@
     {
       "id": "shade-bf16",
       "name": "Shade bf16",
-      "description": "10.9M params · 22MB · near-lossless",
+      "description": "10.9M params \u00b7 22MB \u00b7 near-lossless",
       "bin": "model_shade_bf16.bin",
       "json": "model_shade_bf16.json",
       "size_mb": 22,
@@ -51,7 +51,7 @@
     {
       "id": "shade-8bit",
       "name": "Shade 8-bit",
-      "description": "10.9M params · 11MB · click to load",
+      "description": "10.9M params \u00b7 11MB \u00b7 click to load",
       "bin": "model_shade_8bit.bin",
       "json": "model_shade_8bit.json",
       "size_mb": 11,
@@ -61,9 +61,45 @@
       "available": true
     },
     {
+      "id": "shade-modern",
+      "name": "Shade Modern",
+      "description": "~14M params \u00b7 14MB \u00b7 RMSNorm+SwiGLU+RoPE \u00b7 val_loss 0.580",
+      "bin": "model_shade_modern_8bit.bin",
+      "json": "model_shade_modern_8bit.json",
+      "size_mb": 14,
+      "params": "~14M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "shade-compact",
+      "name": "Shade Compact",
+      "description": "~11M params \u00b7 11MB \u00b7 modern arch compact FFN \u00b7 val_loss 0.589",
+      "bin": "model_shade_compact_8bit.bin",
+      "json": "model_shade_compact_8bit.json",
+      "size_mb": 11,
+      "params": "~11M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
+      "id": "wisp-modern",
+      "name": "Wisp Modern",
+      "description": "~5M params \u00b7 4.6MB \u00b7 modern arch \u00b7 more data \u00b7 val_loss 0.613",
+      "bin": "model_wisp_modern_best_8bit.bin",
+      "json": "model_wisp_modern_best_8bit.json",
+      "size_mb": 4.6,
+      "params": "~5M",
+      "ctx": 128,
+      "default": false,
+      "available": true
+    },
+    {
       "id": "shade-4bit",
       "name": "Shade 4-bit",
-      "description": "10.9M params · 6MB · grouped quant",
+      "description": "10.9M params \u00b7 6MB \u00b7 grouped quant",
       "bin": "model_shade_4bit.bin",
       "json": "model_shade_4bit.json",
       "size_mb": 6,
@@ -75,7 +111,7 @@
     {
       "id": "spec512",
       "name": "Spec512",
-      "description": "27.6M params · 27MB · multi-turn · ctx 1024",
+      "description": "27.6M params \u00b7 27MB \u00b7 multi-turn \u00b7 ctx 1024",
       "bin": "model_spec512_8bit.bin",
       "json": "model_spec512_8bit.json",
       "size_mb": 27,
@@ -88,7 +124,7 @@
     {
       "id": "spec512-4bit",
       "name": "Spec512 4-bit",
-      "description": "27.6M params · 18MB · grouped quant · ctx 1024",
+      "description": "27.6M params \u00b7 18MB \u00b7 grouped quant \u00b7 ctx 1024",
       "bin": "model_spec512_4bit.bin",
       "json": "model_spec512_4bit.json",
       "size_mb": 18,
@@ -101,7 +137,7 @@
     {
       "id": "spec512-fp32",
       "name": "Spec512 fp32",
-      "description": "27.6M params · 99MB · reference",
+      "description": "27.6M params \u00b7 99MB \u00b7 reference",
       "bin": "model_spec512_fp32.bin",
       "json": "model_spec512_fp32.json",
       "size_mb": 99,
@@ -113,7 +149,7 @@
     {
       "id": "spec512-v1.1",
       "name": "Spec512 v1.1",
-      "description": "27.6M params · 27MB · retrained · ctx 1024",
+      "description": "27.6M params \u00b7 27MB \u00b7 retrained \u00b7 ctx 1024",
       "bin": "model_spec512_v1.1_8bit.bin",
       "json": "model_spec512_v1.1_8bit.json",
       "size_mb": 27,
