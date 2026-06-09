@@ -56,68 +56,127 @@
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    padding: 8px 24px;
-    gap: 8px;
+    padding: 6px 16px;
+    gap: 6px;
     border-bottom: 1px solid #33ff3322;
     background: #0d1a0d;
-    flex-wrap: wrap;
   }
 
-  #switcher-label {
-    color: #33ff3355;
-    font-size: 17px;
-    letter-spacing: 1px;
-    flex-shrink: 0;
-    user-select: none;
-  }
-
+  /* Primary chips — clickable, take up left side */
   .model-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     font-family: 'VT323', 'Courier New', monospace;
     font-size: 19px;
-    padding: 2px 10px;
+    padding: 4px 14px;
     border: 1px solid #33ff3333;
     background: transparent;
-    cursor: default;
+    cursor: pointer;
     line-height: 1.4;
     white-space: nowrap;
     user-select: none;
+    transition: background 0.1s, border-color 0.1s, color 0.1s;
   }
+
+  .model-chip:hover { background: #33ff3311; border-color: #33ff3366; color: #33ff33; }
 
   .model-chip.active {
     border-color: #33ff33;
     color: #33ff33;
-    background: #33ff3311;
-  }
-
-  .model-chip.unavailable {
-    border-color: #33ff3318;
-    color: #33ff3333;
+    background: #33ff3319;
   }
 
   .model-chip.available-unloaded {
-    border-color: #33ff3344;
-    color: #33ff3377;
+    border-color: #33ff3333;
+    color: #33ff3366;
   }
+  .model-chip.available-unloaded:hover { color: #33ff33; border-color: #33ff3388; }
 
   .model-chip.loading-chip {
-    border-color: #ffaa0088;
+    border-color: #ffaa0066;
     color: #ffaa00;
+    cursor: default;
+  }
+
+  /* Push legacy dropdown to the right */
+  #legacy-spacer { flex: 1; }
+
+  /* Legacy dropdown */
+  #legacy-wrapper {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  #legacy-btn {
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 15px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid #33ff3322;
+    color: #33ff3344;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+  #legacy-btn:hover { background: #33ff3308; color: #33ff3388; border-color: #33ff3333; }
+
+  #legacy-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    background: #0d1a0d;
+    border: 1px solid #33ff3333;
+    min-width: 200px;
+    z-index: 100;
+    padding: 4px 0;
+  }
+  #legacy-menu.open { display: block; }
+
+  .legacy-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 14px;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 17px;
+    color: #33ff3366;
+    cursor: pointer;
+    gap: 12px;
+    white-space: nowrap;
+  }
+  .legacy-item:hover { background: #33ff3311; color: #33ff33; }
+  .legacy-item.active { color: #33ff33; background: #33ff3311; }
+  .legacy-item.loading { color: #ffaa00; cursor: default; }
+  .legacy-item-size { font-size: 13px; color: #33ff3333; }
+
+  /* Progress bar inside loading chip */
+  .chip-progress {
+    display: inline-block;
+    width: 50px;
+    height: 3px;
+    background: #222;
+    vertical-align: middle;
+    overflow: hidden;
+  }
+  .chip-progress-fill {
+    height: 100%;
+    background: #ffaa00;
+    width: 0%;
+    transition: width 0.3s;
   }
 
   .chip-load-btn {
     background: none;
-    border: 1px solid #33ff3355;
-    color: #33ff3388;
+    border: 1px solid #33ff3344;
+    color: #33ff3366;
     font-family: 'VT323', 'Courier New', monospace;
-    font-size: 16px;
+    font-size: 14px;
     padding: 0 6px;
     cursor: pointer;
     line-height: 1.4;
   }
-
   .chip-load-btn:hover { background: #33ff3311; color: #33ff33; border-color: #33ff33; }
 
   .chip-soon {
@@ -301,16 +360,10 @@
     }
     #model-switcher::-webkit-scrollbar { display: none; }
 
-    #switcher-label { font-size: 14px; }
-
-    .model-chip {
-      font-size: 16px;
-      padding: 2px 8px;
-      flex-shrink: 0;                  /* prevent chips collapsing in scroll container */
-    }
-
-    .chip-load-btn { font-size: 14px; }
-    .chip-soon     { display: none; } /* saves space; "coming soon" understood */
+    .model-chip { font-size: 16px; padding: 3px 10px; }
+    #legacy-btn { font-size: 13px; padding: 3px 8px; }
+    #legacy-menu { min-width: 160px; }
+    .legacy-item { font-size: 15px; padding: 4px 10px; }
 
     /* Terminal */
     #terminal {
@@ -368,10 +421,14 @@
     <div id="loading-text" style="margin-top:8px;font-size:14px;color:#888;"></div>
   </div>
 
-  <!-- Model switcher bar (between header and terminal) -->
+  <!-- Model switcher bar -->
   <div id="model-switcher">
-    <span id="switcher-label">MODEL:</span>
-    <!-- chips rendered dynamically -->
+    <!-- Primary chips rendered dynamically here -->
+    <div id="legacy-spacer"></div>
+    <div id="legacy-wrapper">
+      <button id="legacy-btn">MORE ▾</button>
+      <div id="legacy-menu"><!-- legacy items rendered dynamically --></div>
+    </div>
   </div>
 
   <div id="terminal"></div>
@@ -471,51 +528,64 @@ function updateStatusBar(reg) {
 }
 
 // ── Model switcher chips ───────────────────────────────────────────────────
+function makeProgressChip(reg) {
+  const chip = document.createElement('span');
+  chip.className = 'model-chip loading-chip';
+  chip.id = `chip-${reg.id}`;
+  chip.textContent = reg.name.toUpperCase() + ' ';
+  const bar = document.createElement('span'); bar.className = 'chip-progress';
+  const fill = document.createElement('span'); fill.className = 'chip-progress-fill'; fill.id = `chip-fill-${reg.id}`;
+  bar.appendChild(fill); chip.appendChild(bar);
+  return chip;
+}
+
 function renderSwitcher() {
-  // Remove all chips (keep the label)
-  const label = document.getElementById('switcher-label');
-  switcher.innerHTML = '';
-  switcher.appendChild(label);
+  const legacyMenu   = document.getElementById('legacy-menu');
+  const legacySpacer = document.getElementById('legacy-spacer');
+  const legacyWrapper= document.getElementById('legacy-wrapper');
 
-  for (const reg of registry) {
-    const chip = document.createElement('span');
-
-    if (reg.id === activeId) {
-      // Active model
-      chip.className = 'model-chip active';
-      chip.textContent = reg.name.toUpperCase();
-
-    } else if (!reg.available) {
-      // Coming soon
-      chip.className = 'model-chip unavailable';
-      chip.innerHTML = `${reg.name.toUpperCase()} <span class="chip-soon">(coming soon)</span>`;
-
-    } else if (reg._loading) {
-      // Currently loading
-      chip.className = 'model-chip loading-chip';
-      chip.id = `chip-${reg.id}`;
-      const bar = document.createElement('span');
-      bar.className = 'chip-progress';
-      const fill = document.createElement('span');
-      fill.className = 'chip-progress-fill';
-      fill.id = `chip-fill-${reg.id}`;
-      bar.appendChild(fill);
-      chip.textContent = reg.name.toUpperCase() + ' ';
-      chip.appendChild(bar);
-
-    } else {
-      // Available, not loaded yet
-      chip.className = 'model-chip available-unloaded';
-      const btn = document.createElement('button');
-      btn.className = 'chip-load-btn';
-      btn.textContent = `Load ${reg.size_mb}MB`;
-      btn.addEventListener('click', () => switchModel(reg.id));
-      chip.textContent = reg.name.toUpperCase() + ' ';
-      chip.appendChild(btn);
-    }
-
-    switcher.appendChild(chip);
+  // Clear primary chips (everything before spacer)
+  while (switcher.firstChild && switcher.firstChild !== legacySpacer) {
+    switcher.removeChild(switcher.firstChild);
   }
+  legacyMenu.innerHTML = '';
+
+  const primary   = registry.filter(r => r.primary && r.available !== false);
+  const secondary = registry.filter(r => !r.primary);
+  let   hasLegacy = false;
+
+  // Primary chips
+  for (const reg of primary) {
+    let chip;
+    if (reg._loading) {
+      chip = makeProgressChip(reg);
+    } else {
+      chip = document.createElement('button');
+      chip.className = 'model-chip' + (reg.id === activeId ? ' active' : ' available-unloaded');
+      chip.textContent = reg.name.toUpperCase();
+      chip.title = reg.description || '';
+      if (reg.id !== activeId && !isSwitching) chip.addEventListener('click', () => switchModel(reg.id));
+    }
+    switcher.insertBefore(chip, legacySpacer);
+  }
+
+  // Legacy dropdown items
+  for (const reg of secondary) {
+    if (!reg.available) continue;
+    hasLegacy = true;
+    const item = document.createElement('div');
+    item.className = 'legacy-item' + (reg.id === activeId ? ' active' : '') + (reg._loading ? ' loading' : '');
+    item.innerHTML = `<span>${reg.name.toUpperCase()}</span><span class="legacy-item-size">${reg.size_mb}MB</span>`;
+    if (reg._loading) {
+      const bar = document.createElement('span'); bar.className = 'chip-progress';
+      const fill = document.createElement('span'); fill.className = 'chip-progress-fill'; fill.id = `chip-fill-${reg.id}`;
+      bar.appendChild(fill); item.appendChild(bar);
+    } else if (reg.id !== activeId) {
+      item.addEventListener('click', () => { closeLegacyMenu(); switchModel(reg.id); });
+    }
+    legacyMenu.appendChild(item);
+  }
+  legacyWrapper.style.display = hasLegacy ? '' : 'none';
 }
 
 // ── Switch / load model ───────────────────────────────────────────────────
@@ -828,6 +898,21 @@ input.addEventListener('keydown', async (e) => {
   perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)${histInfo}`;
 
   setInputEnabled(true);
+});
+
+// ── Legacy model dropdown ─────────────────────────────────────────────────
+const legacyBtn  = document.getElementById('legacy-btn');
+const legacyMenu = document.getElementById('legacy-menu');
+
+function closeLegacyMenu() { legacyMenu.classList.remove('open'); }
+
+legacyBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  legacyMenu.classList.toggle('open');
+  input.focus();
+});
+document.addEventListener('click', (e) => {
+  if (!legacyMenu.contains(e.target) && e.target !== legacyBtn) closeLegacyMenu();
 });
 
 // ── Memory mode toggle ────────────────────────────────────────────────────
