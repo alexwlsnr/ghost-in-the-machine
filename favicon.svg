@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" fill="#0a0a0a" rx="4"/>
+  <!-- Ghost body: rounded head, straight sides, wavy hem -->
+  <path d="M7 14 C7 9 11 5 16 5 C21 5 25 9 25 14 L25 27 L22 24 L19 27 L16 24 L13 27 L10 24 L7 27 Z"
+        fill="#33ff33"/>
+  <!-- Eyes (dark cutouts) -->
+  <circle cx="12.5" cy="15" r="2.5" fill="#0a0a0a"/>
+  <circle cx="19.5" cy="15" r="2.5" fill="#0a0a0a"/>
+  <!-- Eye glints -->
+  <circle cx="13.2" cy="14.2" r="0.8" fill="#33ff33"/>
+  <circle cx="20.2" cy="14.2" r="0.8" fill="#33ff33"/>
+</svg>
