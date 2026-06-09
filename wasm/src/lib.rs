@@ -236,6 +236,41 @@ pub unsafe extern "C" fn layer_norm_f32(x: *mut f32, gamma: *const f32, beta: *c
     for i in 0..d { x_slice[i] = (x_slice[i] - mean) * inv_std * g[i] + b[i]; }
 }
 
+// --- RMSNorm ---
+// Used by modern architecture (no mean subtraction, no bias).
+// In-place: x = x / rms(x) * gamma
+
+#[no_mangle]
+pub unsafe extern "C" fn rms_norm_f32(x: *mut f32, gamma: *const f32, dim: i32, eps: f32) {
+    let d = dim as usize;
+    let x_slice = core::slice::from_raw_parts_mut(x, d);
+    let g = core::slice::from_raw_parts(gamma, d);
+    if d == 0 { return; }
+    let rms_sq: f32 = x_slice.iter().map(|v| v * v).sum::<f32>() / d as f32;
+    let inv_rms = 1.0 / (rms_sq + eps).sqrt();
+    for i in 0..d { x_slice[i] = x_slice[i] * inv_rms * g[i]; }
+}
+
+// --- SiLU activation (Swish) ---
+// In-place: x = x * sigmoid(x) = x / (1 + exp(-x))
+
+#[no_mangle]
+pub unsafe extern "C" fn silu_f32(data: *mut f32, len: i32) {
+    let slice = core::slice::from_raw_parts_mut(data, len as usize);
+    for v in slice.iter_mut() {
+        *v = *v / (1.0 + (-*v).exp());
+    }
+}
+
+// --- Element-wise multiply: a[i] *= b[i] ---
+
+#[no_mangle]
+pub unsafe extern "C" fn mul_vec_f32(a: *mut f32, b: *const f32, len: i32) {
+    let a_slice = core::slice::from_raw_parts_mut(a, len as usize);
+    let b_slice = core::slice::from_raw_parts(b, len as usize);
+    for i in 0..len as usize { a_slice[i] *= b_slice[i]; }
+}
+
 // --- Vector operations ---
 
 #[no_mangle]
