@@ -28,11 +28,14 @@ nohup .venv/bin/python3 py/train_transformer.py \
     --n-layers 8 \
     --d-ff 2048 \
     --max-len 1024 \
-    --batch-size 64 \
+    --batch-size 16 \
     --lr 0.0005 \
     --epochs 100 \
     --val-frac 0.02 \
     --patience 15 \
+    --truncate \
+    --amp \
+    --status-file "logs/spec512_v12_status.json" \
     --device cuda \
     > "$LOG" 2>&1 &
 
