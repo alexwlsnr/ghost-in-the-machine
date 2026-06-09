@@ -85,11 +85,12 @@ function makeMatmulDispatch(api, sec, base) {
     // Use SIMD matmul for fp32 if the SIMD kernel was loaded (it exports matmul_f32w_simd).
     // Falls back transparently to the scalar matmul_f32w on non-SIMD builds.
     const fp32mw = api.matmul_f32w_simd ?? api.matmul_f32w;
+    const ternaryMw = api.matmul_ternary_simd ?? api.matmul_ternary;
     return (wName, bPtr, inp, out, inD, outD) => {
         const s = sec[wName];
         const wPtr = S(wName);
         if (s.dtype === 'ternary')
-            api.matmul_ternary(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+            ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int8')
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int4')

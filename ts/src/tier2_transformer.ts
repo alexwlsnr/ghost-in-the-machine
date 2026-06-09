@@ -12,6 +12,7 @@ export interface Arch { vocab_size: number; d_model: number; n_heads: number; n_
 interface WasmApi {
   memory: WebAssembly.Memory;
   matmul_ternary(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
+  matmul_ternary_simd(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   matmul_f32w(w: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   softmax_f32(p: number, n: number): void;
   softmax_causal_f32(p: number, s: number): void;
@@ -117,11 +118,12 @@ function makeMatmulDispatch(api: WasmApi, sec: Record<string, SectionDef>, base:
   const S = (name: string) => base + sec[name].offset;
   // Use SIMD matmul for fp32 if the SIMD kernel was loaded (it exports matmul_f32w_simd).
   // Falls back transparently to the scalar matmul_f32w on non-SIMD builds.
-  const fp32mw = (api as any).matmul_f32w_simd ?? api.matmul_f32w;
+  const fp32mw     = (api as any).matmul_f32w_simd     ?? api.matmul_f32w;
+  const ternaryMw  = (api as any).matmul_ternary_simd  ?? api.matmul_ternary;
   return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
     const s = sec[wName];
     const wPtr = S(wName);
-    if (s.dtype === 'ternary')       api.matmul_ternary(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    if (s.dtype === 'ternary')       ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int8')     api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4')     api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4g')    api.matmul_4bit_grouped(wPtr, base + s.scales_offset!, bPtr, inp, out, inD, outD, s.group_size ?? 32);
