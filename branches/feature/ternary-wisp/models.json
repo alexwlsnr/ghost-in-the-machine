@@ -161,6 +161,34 @@
       "ctx": 1024,
       "default": false,
       "available": true
+    },
+    {
+      "id": "spec512-v1.2-ep27",
+      "name": "Spec512 v1.2 ep27",
+      "description": "Spec512 v1.2 in-training snapshot (ep27, val=0.556)",
+      "bin": "model_spec512_v1.2_ep27.bin",
+      "json": "model_spec512_v1.2_ep27.json",
+      "params": "26M",
+      "ctx": "1024",
+      "size_mb": 27.2,
+      "available": true,
+      "primary": false,
+      "max_new": 55,
+      "rep_penalty": 1.35
+    },
+    {
+      "id": "wisp-ternary",
+      "name": "Wisp Ternary",
+      "description": "First ternary weight model \u2014 3.3M params, 1.6 MB, {-1,0,+1} weights via STE",
+      "bin": "model_wisp_ternary.bin",
+      "json": "model_wisp_ternary.json",
+      "params": "3.3M",
+      "ctx": "256",
+      "size_mb": 1.6,
+      "available": true,
+      "primary": false,
+      "max_new": 80,
+      "rep_penalty": 1.15
     }
   ]
 }
