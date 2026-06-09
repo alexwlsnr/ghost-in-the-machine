@@ -194,8 +194,234 @@ def decode(tokens: List[int]) -> str:
     return bytes(b for b in tokens if b < 256).decode('ascii', errors='replace')
 
 
+# ─── Modern Architecture Components ────────────────────────────────
+
+class RMSNorm(nn.Module):
+    """Root Mean Square Layer Normalization (no mean-centering, no bias).
+
+    Faster than LayerNorm and empirically as good. Used in LLaMA/Gemma.
+    """
+    def __init__(self, d: int, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(d))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = x.pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
+        return x * rms * self.weight
+
+
+class SwiGLUFFN(nn.Module):
+    """SwiGLU feed-forward network: SiLU(W1·x) ⊙ W2·x → W3.
+
+    Better gradient flow than ReLU. Used in LLaMA/Gemma/PaLM.
+    No biases — consistent with modern LLM practice.
+    """
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = nn.Linear(d_model, d_ff, bias=False)  # gate branch
+        self.w2 = nn.Linear(d_model, d_ff, bias=False)  # value branch
+        self.w3 = nn.Linear(d_ff, d_model, bias=False)  # output projection
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
+
+
+def precompute_freqs_cis(d_head: int, max_len: int, base: float = 10000.0) -> torch.Tensor:
+    """Precompute complex rotary frequencies for RoPE.
+
+    Returns complex tensor of shape (max_len, d_head//2).
+    """
+    freqs = 1.0 / (base ** (torch.arange(0, d_head, 2).float() / d_head))
+    t = torch.arange(max_len)
+    freqs = torch.outer(t, freqs)
+    return torch.polar(torch.ones_like(freqs), freqs)
+
+
+def apply_rotary_emb(
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    freqs_cis: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Apply rotary position embeddings to Q and K tensors.
+
+    xq, xk: (batch, seq, n_heads, d_head)
+    freqs_cis: (seq, d_head//2) complex
+    """
+    def rotate(x: torch.Tensor) -> torch.Tensor:
+        B, T, H, D = x.shape
+        xc = torch.view_as_complex(x.float().reshape(B, T, H, D // 2, 2))
+        fc = freqs_cis[:T].unsqueeze(0).unsqueeze(2)  # (1, T, 1, D//2)
+        xr = torch.view_as_real(xc * fc).reshape(B, T, H, D)
+        return xr.type_as(x)
+    return rotate(xq), rotate(xk)
+
+
+class CausalSelfAttention(nn.Module):
+    """Multi-head causal self-attention with optional RoPE."""
+    def __init__(self, d_model: int, n_heads: int, use_rope: bool = True,
+                 dropout: float = 0.1):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_head  = d_model // n_heads
+        self.use_rope = use_rope
+        self.dropout  = dropout
+
+        self.in_proj  = nn.Linear(d_model, 3 * d_model, bias=True)
+        self.out_proj = nn.Linear(d_model, d_model, bias=True)
+
+    def forward(self, x: torch.Tensor,
+                freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
+        B, T, C = x.shape
+        qkv = self.in_proj(x)
+        q, k, v = qkv.split(self.d_model, dim=2)
+
+        q = q.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        k = k.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        v = v.view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+
+        if self.use_rope and freqs_cis is not None:
+            # reshape to (B, T, H, D) for apply_rotary_emb
+            q_r = q.transpose(1, 2)
+            k_r = k.transpose(1, 2)
+            q_r, k_r = apply_rotary_emb(q_r, k_r, freqs_cis[:T])
+            q = q_r.transpose(1, 2)
+            k = k_r.transpose(1, 2)
+
+        # Use PyTorch's flash-attention-compatible SDPA
+        dp = self.dropout if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dp, is_causal=True)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        return self.out_proj(out)
+
+
+class ModernTransformerBlock(nn.Module):
+    """Transformer block with RMSNorm, SwiGLU, and optional RoPE."""
+    def __init__(self, d_model: int, n_heads: int, d_ff: int,
+                 use_rope: bool = True, use_swiglu: bool = True,
+                 use_rmsnorm: bool = True, dropout: float = 0.1):
+        super().__init__()
+        NormCls = RMSNorm if use_rmsnorm else nn.LayerNorm
+        self.norm1 = NormCls(d_model)
+        self.norm2 = NormCls(d_model)
+        self.attn  = CausalSelfAttention(d_model, n_heads, use_rope=use_rope,
+                                         dropout=dropout)
+        if use_swiglu:
+            self.ff = SwiGLUFFN(d_model, d_ff)
+        else:
+            self.ff = nn.Sequential(
+                nn.Linear(d_model, d_ff), nn.ReLU(),
+                nn.Linear(d_ff, d_model),
+            )
+
+    def forward(self, x: torch.Tensor,
+                freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x), freqs_cis)
+        x = x + self.ff(self.norm2(x))
+        return x
+
+
+class TinyTransformerModern(nn.Module):
+    """Modern transformer with RMSNorm, SwiGLU, RoPE, and optional weight tying.
+
+    Drop-in replacement for TinyTransformer with improved components:
+    - RMSNorm: faster, no mean centering, no bias
+    - SwiGLU: gated FFN, better gradient flow
+    - RoPE: rotary position embeddings, better length generalisation
+    - Weight tying: shares token embedding and output head weights
+    """
+    def __init__(
+        self,
+        vocab_size: int = VOCAB_SIZE,
+        d_model: int = 256,
+        n_heads: int = 4,
+        n_layers: int = 4,
+        d_ff: int = 1024,
+        max_len: int = DEFAULT_MAX_LEN,
+        dropout: float = 0.1,
+        use_rope:    bool = True,
+        use_swiglu:  bool = True,
+        use_rmsnorm: bool = True,
+        tie_weights: bool = True,
+    ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model    = d_model
+        self.n_heads    = n_heads
+        self.n_layers   = n_layers
+        self.d_ff       = d_ff
+        self.max_len    = max_len
+        self.use_rope   = use_rope
+
+        self.token_embed = nn.Embedding(vocab_size, d_model)
+
+        if use_rope:
+            self.register_buffer(
+                'freqs_cis',
+                precompute_freqs_cis(d_model // n_heads, max_len),
+                persistent=False,
+            )
+        else:
+            self.pos_embed = nn.Embedding(max_len, d_model)
+
+        self.blocks = nn.ModuleList([
+            ModernTransformerBlock(d_model, n_heads, d_ff,
+                                   use_rope=use_rope, use_swiglu=use_swiglu,
+                                   use_rmsnorm=use_rmsnorm, dropout=dropout)
+            for _ in range(n_layers)
+        ])
+
+        NormCls = RMSNorm if use_rmsnorm else nn.LayerNorm
+        self.ln_final = NormCls(d_model)
+        self.head = nn.Linear(d_model, vocab_size, bias=False)
+
+        if tie_weights:
+            self.head.weight = self.token_embed.weight
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for name, p in self.named_parameters():
+            if p.dim() > 1 and 'token_embed' not in name:
+                nn.init.xavier_uniform_(p, gain=0.5)
+        nn.init.normal_(self.token_embed.weight, std=0.02)
+
+    def compute_quantization_loss(self, weight_bits: int = 4) -> torch.Tensor:
+        max_int = float(2 ** (weight_bits - 1) - 1)
+        loss = torch.tensor(0.0, device=next(self.parameters()).device)
+        for p in self.parameters():
+            if p.dim() <= 1:
+                continue
+            absmax = p.detach().abs().max().clamp(min=1e-8)
+            scale = absmax / max_int
+            quantized = (p / scale).round().clamp(-max_int, max_int) * scale
+            loss = loss + (p - quantized).pow(2).mean()
+        return loss
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        h = self.token_embed(x) * math.sqrt(self.d_model)
+
+        if self.use_rope:
+            freqs = self.freqs_cis[:T]
+            for block in self.blocks:
+                h = block(h, freqs)
+        else:
+            pos = torch.arange(T, device=x.device).unsqueeze(0)
+            h = h + self.pos_embed(pos)
+            for block in self.blocks:
+                h = block(h)
+
+        h = self.ln_final(h)
+        return self.head(h)
+
+
+# ─── Sequence builders ──────────────────────────────────────────────
+
 def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
-                  truncate: bool = False) -> Tuple[List[int], List[int]]:
+                  truncate: bool = False, mask_query: bool = False) -> Tuple[List[int], List[int]]:
     """Create input/target pair for autoregressive training.
 
     Layout: [Q bytes] [SEP] [R bytes] [EOS]
@@ -228,6 +454,13 @@ def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
     tgt = full[1:] + [EOS_TOKEN, PAD_TOKEN]
     tgt = tgt[:len(inp)]
 
+    # Response loss masking: replace query positions with PAD so loss is only
+    # computed on response tokens. The position at index len(q_bytes) predicts
+    # the first response byte (given Q+SEP context) — keep that.
+    if mask_query:
+        for i in range(len(q_bytes)):
+            tgt[i] = PAD_TOKEN
+
     return inp, tgt
 
 
@@ -249,7 +482,8 @@ def split_pairs(pairs, val_frac: float, seed: int = 0):
     return train, val
 
 
-def _build_sequences(pairs, max_len: int, preserve_case: bool = False, truncate: bool = False):
+def _build_sequences(pairs, max_len: int, preserve_case: bool = False,
+                     truncate: bool = False, mask_query: bool = False):
     """Tokenize pairs into (inputs, targets), dropping empty / too-short ones.
 
     Accepts either single-turn (q, r) tuples or multi-turn [(q1,r1),(q2,r2),...]
@@ -258,7 +492,6 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False, truncate:
     """
     inputs, targets = [], []
     for item in pairs:
-        # Normalise: bare (q, r) tuple → single-element turn list
         turns = [item] if isinstance(item, tuple) else list(item)
         if not turns or not all(q and r for q, r in turns):
             continue
@@ -267,9 +500,10 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False, truncate:
         else:
             turns = [(q.strip(), r.strip()) for q, r in turns]
         if len(turns) == 1:
-            inp, tgt = make_sequence(turns[0][0], turns[0][1], max_len, truncate=truncate)
+            inp, tgt = make_sequence(turns[0][0], turns[0][1], max_len,
+                                     truncate=truncate, mask_query=mask_query)
         else:
-            inp, tgt = make_sequence_multiturn(turns, max_len)
+            inp, tgt = make_sequence_multiturn(turns, max_len, mask_query=mask_query)
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -296,6 +530,7 @@ def parse_multiturn_line(line: str) -> Optional[List[Tuple[str, str]]]:
 def make_sequence_multiturn(
     turns: List[Tuple[str, str]],
     max_len: int = DEFAULT_MAX_LEN,
+    mask_query: bool = False,
 ) -> Tuple[List[int], List[int]]:
     """Build an autoregressive sequence from a list of (query, response) pairs.
 
@@ -303,10 +538,19 @@ def make_sequence_multiturn(
 
     Returns ([], []) when the sequence exceeds max_len.
     For a single turn this produces an identical result to make_sequence().
+
+    mask_query: if True, query byte positions in the target are set to PAD_TOKEN
+      so the loss is only computed on response tokens.
     """
     tokens: List[int] = []
+    # Track which positions are query bytes (for masking)
+    is_query_pos: List[bool] = []
     for q, r in turns:
-        tokens += encode(q) + [SEP_TOKEN] + encode(r) + [SEP_TOKEN]
+        q_bytes = encode(q)
+        r_bytes = encode(r)
+        tokens += q_bytes + [SEP_TOKEN] + r_bytes + [SEP_TOKEN]
+        is_query_pos += [True] * len(q_bytes) + [False] * (1 + len(r_bytes) + 1)
+
     # Replace trailing SEP with EOS
     if not tokens:
         return [], []
@@ -316,7 +560,14 @@ def make_sequence_multiturn(
         return [], []
 
     inp = tokens
-    tgt = tokens[1:] + [PAD_TOKEN]   # shift-left; last slot predicts PAD (ignored in loss)
+    tgt = tokens[1:] + [PAD_TOKEN]
+
+    if mask_query:
+        # tgt[i] predicts inp[i+1]; mask position i when inp[i] is a query byte
+        for i in range(len(tgt)):
+            if i < len(is_query_pos) and is_query_pos[i]:
+                tgt[i] = PAD_TOKEN
+
     return inp, tgt
 
 
@@ -344,6 +595,7 @@ def train_transformer(
     status_file: Optional[str] = None,
     preserve_case: bool = False,
     truncate: bool = False,
+    mask_query: bool = False,
 ):
     """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
     # Lazy-import supervision emitter — no hard dep when not used.
@@ -362,15 +614,17 @@ def train_transformer(
             _ws = _mod.write_status
         _write_status = _ws
 
+    from datetime import datetime
     print(f"Device: {device}")
     print(f"Training on {len(pairs)} pairs, {epochs} epochs")
+    print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
 
     model = model.to(device)
     model.train()
 
     train_pairs, val_pairs = split_pairs(pairs, val_frac)
-    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate)
-    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate)
+    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate, mask_query)
+    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate, mask_query)
 
     print(f"Sequences — train: {len(all_inputs)}, val: {len(val_inputs)}")
     total_params = sum(p.numel() for p in model.parameters())
@@ -479,7 +733,9 @@ def train_transformer(
             model.train()
 
         if (epoch + 1) % 5 == 0:
-            msg = f"  Epoch {epoch + 1:4d}/{epochs}: loss={avg_loss:.4f}, acc={acc:.3f}"
+            from datetime import datetime
+            ts = datetime.utcnow().strftime('%H:%M:%S')
+            msg = f"  [{ts}] Epoch {epoch + 1:4d}/{epochs}: loss={avg_loss:.4f}, acc={acc:.3f}"
             if val_loss is not None:
                 msg += f", val_loss={val_loss:.4f}"
             print(msg)
@@ -497,6 +753,13 @@ def train_transformer(
                 'model_state': model.state_dict(),
                 'architecture': {
                     'type': 'tiny_transformer',
+                    'arch': 'modern' if isinstance(model, TinyTransformerModern) else 'classic',
+                    # Save individual modern flags so loaders don't need to infer from state dict
+                    **({'use_rope':     model.use_rope,
+                        'use_swiglu':   any(hasattr(b.ff, 'w1') for b in model.blocks),
+                        'use_rmsnorm':  isinstance(model.blocks[0].norm1, RMSNorm),
+                        'tie_weights':  model.head.weight is model.token_embed.weight,
+                       } if isinstance(model, TinyTransformerModern) else {}),
                     'vocab_size': model.vocab_size,
                     'd_model': model.d_model,
                     'n_heads': model.n_heads,
@@ -542,7 +805,8 @@ def train_transformer(
             pid=os.getpid(), checkpoint=checkpoint_file, eta_seconds=0,
         )
 
-    print(f"\nBest acc: {best_acc:.3f} at epoch {best_epoch}")
+    print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print(f"Best acc: {best_acc:.3f} at epoch {best_epoch}")
     return {
         'model': model,
         'epochs_run': epoch + 1,
@@ -630,6 +894,15 @@ if __name__ == '__main__':
                         help='disable uppercase normalization (required for Wraith/technical models)')
     parser.add_argument('--truncate', action='store_true',
                         help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
+    parser.add_argument('--arch', default='classic', choices=['classic', 'modern'],
+                        help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
+    parser.add_argument('--mask-query-loss', action='store_true',
+                        help='only compute loss on response tokens (masks query positions)')
+    # Fine-grained modern arch overrides (only apply when --arch modern)
+    parser.add_argument('--no-rope',      action='store_true', help='disable RoPE (use learned pos embed)')
+    parser.add_argument('--no-swiglu',    action='store_true', help='disable SwiGLU (use ReLU FFN)')
+    parser.add_argument('--no-rmsnorm',   action='store_true', help='disable RMSNorm (use LayerNorm)')
+    parser.add_argument('--no-tie-weights', action='store_true', help='disable weight tying')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -672,14 +945,28 @@ if __name__ == '__main__':
         remaining = max(1, args.epochs - start_epoch)
         print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
     else:
-        model = TinyTransformer(
-            vocab_size=VOCAB_SIZE,
-            d_model=args.d_model,
-            n_heads=args.n_heads,
-            n_layers=args.n_layers,
-            d_ff=args.d_ff,
-            max_len=args.max_len,
-        )
+        if args.arch == 'modern':
+            model = TinyTransformerModern(
+                vocab_size=VOCAB_SIZE,
+                d_model=args.d_model,
+                n_heads=args.n_heads,
+                n_layers=args.n_layers,
+                d_ff=args.d_ff,
+                max_len=args.max_len,
+                use_rope=not args.no_rope,
+                use_swiglu=not args.no_swiglu,
+                use_rmsnorm=not args.no_rmsnorm,
+                tie_weights=not args.no_tie_weights,
+            )
+        else:
+            model = TinyTransformer(
+                vocab_size=VOCAB_SIZE,
+                d_model=args.d_model,
+                n_heads=args.n_heads,
+                n_layers=args.n_layers,
+                d_ff=args.d_ff,
+                max_len=args.max_len,
+            )
         remaining = args.epochs
 
     result = train_transformer(
@@ -691,6 +978,7 @@ if __name__ == '__main__':
         status_file=args.status_file,
         preserve_case=args.preserve_case,
         truncate=args.truncate,
+        mask_query=args.mask_query_loss,
     )
     model = result['model']
 

@@ -1,0 +1,35 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 400 epochs
+Started: 2026-06-09 00:04:38 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 10,730,112
+Mixed precision: bf16 autocast enabled
+  [00:05:57] Epoch    5/400: loss=0.5988, acc=0.805, val_loss=0.6140
+  [00:07:17] Epoch   10/400: loss=0.4705, acc=0.842, val_loss=0.5886
+  [00:08:35] Epoch   15/400: loss=0.3802, acc=0.869, val_loss=0.6175
+  [00:09:53] Epoch   20/400: loss=0.3117, acc=0.890, val_loss=0.6777
+  [00:11:11] Epoch   25/400: loss=0.2637, acc=0.906, val_loss=0.7361
+  [00:12:28] Epoch   30/400: loss=0.2307, acc=0.917, val_loss=0.7846
+  [00:13:46] Epoch   35/400: loss=0.2084, acc=0.925, val_loss=0.8360
+  [00:15:04] Epoch   40/400: loss=0.1915, acc=0.931, val_loss=0.8805
+  [00:16:22] Epoch   45/400: loss=0.1789, acc=0.936, val_loss=0.9097
+  [00:17:40] Epoch   50/400: loss=0.1689, acc=0.939, val_loss=0.9329
+
+Early stop at epoch 50 (no val improvement for 40 epochs)
+
+Finished: 2026-06-09 00:17:40 UTC
+Best acc: 0.842 at epoch 10
+
+Sample generations:
+  HELLO                → HII HUMAN! I'M GHOST, YOUR FRIEND AND DIGITAL SIDE
+  HOW ARE YOU          → I AM FEELING QUITE SPARKLED AND READY TO CHAT WITH
+  TELL ME A JOKE       → WHY DID THE BONES GO TO THE PARTY? BECAUSE THEY HA
+  WHO ARE YOU          → I AM GHOST, A TINY BYTE-LEVEL ASSISTANT, AND YOU R
+  THANKS               → YOU. I'M JUST SO HAPPY THAT ALL MY MAKE A NAP CRAN

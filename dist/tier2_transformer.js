@@ -12,10 +12,12 @@ async function fetchBuf(url) {
 }
 // Worst-case scratch the forward pass bump-allocates (bytes) at full context.
 // Mirrors the `ba(...)` allocations in forward() — keep the two in sync.
+// SwiGLU needs 2×d_ff scratch per position (gate + value buffers).
 function forwardScratchBytes(arch) {
     const d = arch.d_model, ff = arch.d_ff, v = arch.vocab_size, seq = arch.max_len;
     const al = (n) => (n * 4 + 15) & ~15;
-    return al(seq * d) + al(seq * d * 3) + al(seq * Math.max(d, ff))
+    const maxFF = arch.use_swiglu ? ff * 2 : ff;
+    return al(seq * d) + al(seq * d * 3) + al(seq * Math.max(d, maxFF))
         + al(d) + al(seq * seq) + al(seq * d) + al(v * 2);
 }
 /** Detect Wasm SIMD128 support at runtime (tiny probe Wasm module). */
@@ -51,21 +53,19 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     // function stack writes will corrupt the weights.
     const heapBase = (wasm.instance.exports.__heap_base?.value ?? 0);
     const base = (heapBase + 15) & ~15;
-    let maxOff = 0;
-    for (const s of Object.values(sec))
-        maxOff = Math.max(maxOff, s.offset + s.size);
-    // Headroom = the forward pass's scratch, sized from the arch (not a fixed 8 MB),
-    // so larger models (more layers, longer context) get enough memory. +1 page slack.
+    // Use the full binary size for memory allocation — this correctly handles
+    // formats like int4g where per-group scales are appended after the weight
+    // nibbles and would be missed if we only summed s.offset + s.size.
+    const binSize = binBuf.byteLength;
     const margin = forwardScratchBytes(manifest.architecture) + 65536;
-    const needPages = Math.ceil((base + maxOff + margin) / 65536);
+    const needPages = Math.ceil((base + binSize + margin) / 65536);
     const curPages = mem.buffer.byteLength / 65536;
     if (needPages > curPages)
         mem.grow(needPages - curPages);
+    // Copy the entire model binary in one shot so all scale arrays land correctly.
     const mem8 = new Uint8Array(mem.buffer);
     const bin8 = new Uint8Array(binBuf);
-    for (const s of Object.values(sec)) {
-        mem8.set(bin8.subarray(s.offset, s.offset + s.size), base + s.offset);
-    }
+    mem8.set(bin8, base);
     return { api, manifest: manifest.architecture, sec, base };
 }
 export function encode(text) {
@@ -92,6 +92,8 @@ function makeMatmulDispatch(api, sec, base) {
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
         else if (s.dtype === 'int4')
             api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+        else if (s.dtype === 'int4g')
+            api.matmul_4bit_grouped(wPtr, base + s.scales_offset, bPtr, inp, out, inD, outD, s.group_size ?? 32);
         else if (s.dtype === 'bfloat16')
             api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
         else
@@ -99,45 +101,111 @@ function makeMatmulDispatch(api, sec, base) {
     };
 }
 // ─── Forward ───────────────────────────────────────────────────────
+// ── RoPE helper (computed in JS — no Wasm needed) ────────────────────────
+function precomputeRoPE(dHead, maxLen) {
+    const half = dHead >> 1;
+    const cos = new Float32Array(maxLen * half);
+    const sin = new Float32Array(maxLen * half);
+    for (let p = 0; p < maxLen; p++) {
+        for (let i = 0; i < half; i++) {
+            const theta = p / Math.pow(10000, (2 * i) / dHead);
+            cos[p * half + i] = Math.cos(theta);
+            sin[p * half + i] = Math.sin(theta);
+        }
+    }
+    return { cos, sin };
+}
+function applyRoPEToVec(vec, pos, cos, sin, dHead) {
+    // PyTorch view_as_complex pairs consecutive elements: (vec[0],vec[1]), (vec[2],vec[3])...
+    const half = dHead >> 1;
+    for (let i = 0; i < half; i++) {
+        const x0 = vec[i * 2], x1 = vec[i * 2 + 1];
+        const c = cos[pos * half + i], s = sin[pos * half + i];
+        vec[i * 2] = x0 * c - x1 * s;
+        vec[i * 2 + 1] = x0 * s + x1 * c;
+    }
+}
+// Cache RoPE frequencies per (d_head, max_len) pair
+const ropeCache = new Map();
+function getRoPE(dHead, maxLen) {
+    const key = `${dHead}_${maxLen}`;
+    if (!ropeCache.has(key))
+        ropeCache.set(key, precomputeRoPE(dHead, maxLen));
+    return ropeCache.get(key);
+}
 export function forward(api, sec, arch, tokens, base) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
+    const useRope = !!arch.use_rope;
+    const useSwiglu = !!arch.use_swiglu;
+    const useRmsnorm = !!arch.use_rmsnorm;
     // Section pointer helper: actual address = base + manifest offset
     const S = (name) => base + sec[name].offset;
     const mw = makeMatmulDispatch(api, sec, base);
     let off = base;
-    for (const s of Object.values(sec))
-        off = Math.max(off, base + s.offset + s.size);
+    for (const s of Object.values(sec)) {
+        const end = base + s.offset + s.size + (s.scales_size ?? 0);
+        if (end > off)
+            off = end;
+    }
     off = (off + 15) & ~15;
     const ba = (n) => { const o = off; off = (off + n * 4 + 15) & ~15; return o; };
     const f32 = (o, n) => new Float32Array(mem.buffer, o, n);
     const eOff = ba(seq * d);
     const qOff = ba(seq * d * 3);
-    const tOff = ba(seq * Math.max(d, arch.d_ff));
+    // For SwiGLU we need 2×d_ff scratch (gate + val); for classic ReLU just d_ff
+    const ffScratch = useSwiglu ? arch.d_ff * 2 : arch.d_ff;
+    const tOff = ba(seq * Math.max(d, ffScratch));
     const lOff = ba(d);
     const sOff = ba(seq * seq);
     const aOff = ba(seq * d);
-    const oOff = ba(arch.vocab_size * 2); // zero-bias buffer + logits, vocab_size each
+    const oOff = ba(arch.vocab_size * 2);
+    const rope = useRope ? getRoPE(dh, arch.max_len) : null;
     // 1. Embedding
     const teW = f32(S('token_embed'), arch.vocab_size * d);
-    const peW = f32(S('pos_embed'), arch.max_len * d);
     const emb = f32(eOff, seq * d);
-    for (let p = 0; p < seq; p++) {
-        const tid = tokens[p];
-        for (let j = 0; j < d; j++)
-            emb[p * d + j] = teW[tid * d + j] + peW[p * d + j];
+    if (useRope) {
+        // RoPE: no positional embedding addition
+        for (let p = 0; p < seq; p++) {
+            const tid = tokens[p];
+            for (let j = 0; j < d; j++)
+                emb[p * d + j] = teW[tid * d + j];
+        }
     }
+    else {
+        const peW = f32(S('pos_embed'), arch.max_len * d);
+        for (let p = 0; p < seq; p++) {
+            const tid = tokens[p];
+            for (let j = 0; j < d; j++)
+                emb[p * d + j] = teW[tid * d + j] + peW[p * d + j];
+        }
+    }
+    // Normalisation function — routes to RMSNorm or LayerNorm
+    const applyNorm = (x, w, b) => {
+        if (useRmsnorm)
+            api.rms_norm_f32(x, w, d, 1e-5);
+        else
+            api.layer_norm_f32(x, w, b, d, 1e-5);
+    };
     // 2. Layers
     for (let li = 0; li < nl; li++) {
         const pfx = `enc${li}`;
-        // Attention: LN + QKV
+        // Attention pre-norm + QKV
         for (let p = 0; p < seq; p++) {
-            // Copy emb[p] into lOff for layer norm — TypedArray.set is a native memcpy
             f32(lOff, d).set(new Float32Array(mem.buffer, eOff + p * d * 4, d));
-            api.layer_norm_f32(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`), d, 1e-5);
+            applyNorm(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`));
             const qp = qOff + p * d * 3 * 4;
             mw(`${pfx}_q_weight`, S(`${pfx}_q_bias`), lOff, qp, d, d);
             mw(`${pfx}_k_weight`, S(`${pfx}_k_bias`), lOff, qp + d * 4, d, d);
             mw(`${pfx}_v_weight`, S(`${pfx}_v_bias`), lOff, qp + d * 8, d, d);
+            // RoPE: rotate Q and K for this position
+            if (rope) {
+                const qVec = f32(qp, d);
+                const kVec = f32(qp + d * 4, d);
+                for (let h = 0; h < nh; h++) {
+                    applyRoPEToVec(qVec.subarray(h * dh, h * dh + dh), p, rope.cos, rope.sin, dh);
+                    applyRoPEToVec(kVec.subarray(h * dh, h * dh + dh), p, rope.cos, rope.sin, dh);
+                }
+            }
         }
         api.attention_f32(qOff, sOff, aOff, seq, d, nh);
         for (let p = 0; p < seq; p++) {
@@ -147,19 +215,31 @@ export function forward(api, sec, arch, tokens, base) {
         // FFN
         for (let p = 0; p < seq; p++) {
             f32(lOff, d).set(new Float32Array(mem.buffer, eOff + p * d * 4, d));
-            api.layer_norm_f32(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`), d, 1e-5);
-            const up = tOff + p * arch.d_ff * 4;
-            mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, up, d, arch.d_ff);
-            api.relu_f32(up, arch.d_ff);
-            mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), up, lOff, arch.d_ff, d);
-            // Residual add — use the existing Wasm export instead of a JS loop
+            applyNorm(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`));
+            if (useSwiglu) {
+                // SwiGLU: gate = matmul(x, w1), val = matmul(x, w2)
+                //         output = silu(gate) * val → matmul(output, w3)
+                const gateOff = tOff + p * ffScratch * 4;
+                const valOff = gateOff + arch.d_ff * 4;
+                mw(`${pfx}_ff_gate_weight`, S(`${pfx}_ff1_bias`), lOff, gateOff, d, arch.d_ff);
+                mw(`${pfx}_ff_val_weight`, S(`${pfx}_ff1_bias`), lOff, valOff, d, arch.d_ff);
+                api.silu_f32(gateOff, arch.d_ff);
+                api.mul_vec_f32(gateOff, valOff, arch.d_ff);
+                mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), gateOff, lOff, arch.d_ff, d);
+            }
+            else {
+                const up = tOff + p * arch.d_ff * 4;
+                mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, up, d, arch.d_ff);
+                api.relu_f32(up, arch.d_ff);
+                mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), up, lOff, arch.d_ff, d);
+            }
             api.add_vec_f32(eOff + p * d * 4, lOff, d);
         }
     }
-    // 3. Final LN + head
+    // 3. Final norm + head
     const lp = seq - 1;
     f32(lOff, d).set(new Float32Array(mem.buffer, eOff + lp * d * 4, d));
-    api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
+    applyNorm(lOff, S('lnf_w'), S('lnf_b'));
     const zb = f32(oOff, arch.vocab_size);
     zb.fill(0);
     const lgOff = oOff + arch.vocab_size * 4;
@@ -187,63 +267,87 @@ export function createCache(model) {
 function forwardIncremental(api, sec, arch, token, pos, base, cache) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
     const mem = api.memory;
+    const useRope = !!arch.use_rope;
+    const useSwiglu = !!arch.use_swiglu;
+    const useRmsnorm = !!arch.use_rmsnorm;
     const S = (name) => base + sec[name].offset;
     const mw = makeMatmulDispatch(api, sec, base);
-    // Scratch positioned after all weight sections, same convention as forward().
+    const rope = useRope ? getRoPE(dh, arch.max_len) : null;
     let off = base;
-    for (const s of Object.values(sec))
-        off = Math.max(off, base + s.offset + s.size);
+    for (const s of Object.values(sec)) {
+        const end = base + s.offset + s.size + (s.scales_size ?? 0);
+        if (end > off)
+            off = end;
+    }
     off = (off + 15) & ~15;
     const ba = (n) => { const o = off; off = (off + n * 4 + 15) & ~15; return o; };
     const f32 = (o, n) => new Float32Array(mem.buffer, o, n);
-    // Fixed scratch buffers allocated before the layer loop.
-    const xOff = ba(d); // current hidden state for the single new position
-    const qOff = ba(d); // Q vector for the new position
-    const kvOff = ba(d); // temp K or V vector, written to cache then reused
-    const aOff = ba(d); // attention output vector
+    const xOff = ba(d);
+    const qOff = ba(d);
+    const kvOff = ba(d);
+    const aOff = ba(d);
     const seqLen = pos + 1;
-    const scOff = ba(seqLen); // attention scores: Q[pos] attends to 0..pos
-    const lOff = ba(d); // temp for layernorm / ffn output
-    const oOff = ba(arch.vocab_size * 2); // zero-bias buffer + logits
-    // 1. Embedding: token + positional
+    const scOff = ba(seqLen);
+    const lOff = ba(d);
+    // Pre-allocate FFN scratch outside the loop to avoid unbounded growth.
+    const ffOff = ba(arch.d_ff); // classic ReLU or SwiGLU gate
+    const ffValOff = useSwiglu ? ba(arch.d_ff) : 0; // SwiGLU value branch
+    const oOff = ba(arch.vocab_size * 2);
+    const applyNorm = (x, w, b) => {
+        if (useRmsnorm)
+            api.rms_norm_f32(x, w, d, 1e-5);
+        else
+            api.layer_norm_f32(x, w, b, d, 1e-5);
+    };
+    // 1. Embedding
     const teW = f32(S('token_embed'), arch.vocab_size * d);
-    const peW = f32(S('pos_embed'), arch.max_len * d);
     const xVec = f32(xOff, d);
-    for (let j = 0; j < d; j++)
-        xVec[j] = teW[token * d + j] + peW[pos * d + j];
+    if (useRope) {
+        for (let j = 0; j < d; j++)
+            xVec[j] = teW[token * d + j];
+    }
+    else {
+        const peW = f32(S('pos_embed'), arch.max_len * d);
+        for (let j = 0; j < d; j++)
+            xVec[j] = teW[token * d + j] + peW[pos * d + j];
+    }
     // 2. Layers
     for (let li = 0; li < nl; li++) {
         const pfx = `enc${li}`;
-        const cacheK = cache.k[li]; // Float32Array [max_len * d]
+        const cacheK = cache.k[li];
         const cacheV = cache.v[li];
-        // ── Attention sub-layer ──────────────────────────────────────────
-        // 2a. LayerNorm of x → lOff
+        // Pre-norm
         const lnBuf = f32(lOff, d);
         lnBuf.set(f32(xOff, d));
-        api.layer_norm_f32(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`), d, 1e-5);
-        // 2b. Q/K/V for position pos
+        applyNorm(lOff, S(`${pfx}_ln1_w`), S(`${pfx}_ln1_b`));
+        // QKV
         mw(`${pfx}_q_weight`, S(`${pfx}_q_bias`), lOff, qOff, d, d);
         mw(`${pfx}_k_weight`, S(`${pfx}_k_bias`), lOff, kvOff, d, d);
-        cacheK.set(f32(kvOff, d), pos * d); // Store K[pos] into cache
+        // RoPE: rotate Q and K for current position
+        if (rope) {
+            const qv = f32(qOff, d), kv = f32(kvOff, d);
+            for (let h = 0; h < nh; h++) {
+                applyRoPEToVec(qv.subarray(h * dh, h * dh + dh), pos, rope.cos, rope.sin, dh);
+                applyRoPEToVec(kv.subarray(h * dh, h * dh + dh), pos, rope.cos, rope.sin, dh);
+            }
+        }
+        cacheK.set(f32(kvOff, d), pos * d);
         mw(`${pfx}_v_weight`, S(`${pfx}_v_bias`), lOff, kvOff, d, d);
-        cacheV.set(f32(kvOff, d), pos * d); // Store V[pos] into cache
-        // 2c. Multi-head attention: Q[pos] attends to K[0..pos], V[0..pos]
+        cacheV.set(f32(kvOff, d), pos * d);
+        // Attention
         const attn = f32(aOff, d);
         attn.fill(0);
         const scores = f32(scOff, seqLen);
         const q = f32(qOff, d);
         for (let h = 0; h < nh; h++) {
             const ho = h * dh;
-            // Dot products: Q[pos, h] · K[kj, h] for kj = 0..pos
             for (let kj = 0; kj < seqLen; kj++) {
                 let dot = 0;
                 for (let xi = 0; xi < dh; xi++)
                     dot += q[ho + xi] * cacheK[kj * d + ho + xi];
                 scores[kj] = dot / Math.sqrt(dh);
             }
-            // Softmax over seqLen positions (all kj <= pos, no causal masking needed)
             api.softmax_f32(scOff, seqLen);
-            // Weighted sum over V
             for (let xi = 0; xi < dh; xi++) {
                 let val = 0;
                 for (let kj = 0; kj < seqLen; kj++)
@@ -251,29 +355,32 @@ function forwardIncremental(api, sec, arch, token, pos, base, cache) {
                 attn[ho + xi] = val;
             }
         }
-        // 2d. Output projection + residual
         mw(`${pfx}_o_weight`, S(`${pfx}_o_bias`), aOff, lOff, d, d);
         const lVec = f32(lOff, d);
         for (let j = 0; j < d; j++)
             xVec[j] += lVec[j];
-        // ── FFN sub-layer ────────────────────────────────────────────────
-        // 2e. LayerNorm of x → lOff
+        // FFN
         lnBuf.set(f32(xOff, d));
-        api.layer_norm_f32(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`), d, 1e-5);
-        // 2f. ff1 (d -> d_ff), ReLU, ff2 (d_ff -> lOff as output).
-        // ffOff is bump-allocated inside the layer loop; monotone bump means no aliasing.
-        const ffOff = ba(arch.d_ff);
-        mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, ffOff, d, arch.d_ff);
-        api.relu_f32(ffOff, arch.d_ff);
-        mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), ffOff, lOff, arch.d_ff, d);
-        // 2g. Residual add
+        applyNorm(lOff, S(`${pfx}_ln2_w`), S(`${pfx}_ln2_b`));
+        if (useSwiglu) {
+            mw(`${pfx}_ff_gate_weight`, S(`${pfx}_ff1_bias`), lOff, ffOff, d, arch.d_ff);
+            mw(`${pfx}_ff_val_weight`, S(`${pfx}_ff1_bias`), lOff, ffValOff, d, arch.d_ff);
+            api.silu_f32(ffOff, arch.d_ff);
+            api.mul_vec_f32(ffOff, ffValOff, arch.d_ff);
+            mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), ffOff, lOff, arch.d_ff, d);
+        }
+        else {
+            mw(`${pfx}_ff1_weight`, S(`${pfx}_ff1_bias`), lOff, ffOff, d, arch.d_ff);
+            api.relu_f32(ffOff, arch.d_ff);
+            mw(`${pfx}_ff2_weight`, S(`${pfx}_ff2_bias`), ffOff, lOff, arch.d_ff, d);
+        }
         for (let j = 0; j < d; j++)
             xVec[j] += lVec[j];
     }
-    // 3. Final LN + head
+    // 3. Final norm + head
     const lnFinal = f32(lOff, d);
     lnFinal.set(f32(xOff, d));
-    api.layer_norm_f32(lOff, S('lnf_w'), S('lnf_b'), d, 1e-5);
+    applyNorm(lOff, S('lnf_w'), S('lnf_b'));
     const zb = f32(oOff, arch.vocab_size);
     zb.fill(0);
     const lgOff = oOff + arch.vocab_size * 4;
@@ -326,9 +433,20 @@ export function buildContextTokens(history, query, maxLen, maxHistory = 1) {
  * Sample a token index from logits with temperature + optional top-k / top-p.
  * topK=0 / topP=1.0 → pure temperature (default, backward-compatible).
  * Recommended for Shade/Specter: topK=40, topP=0.9.
+ *
+ * repPenalty > 1.0 penalises tokens that appeared in recentTokens by dividing
+ * their logit by the penalty before softmax. 1.3 is subtle, 1.5 is aggressive.
  */
-export function sampleFromLogits(logits, temp, topK, topP, rand) {
+export function sampleFromLogits(logits, temp, topK, topP, rand, repPenalty = 1.0, recentTokens = []) {
     const n = logits.length;
+    // Repetition penalty: divide logits of recently-seen tokens
+    if (repPenalty > 1.0 && recentTokens.length > 0) {
+        const seen = new Set(recentTokens);
+        for (const tok of seen) {
+            if (tok < n)
+                logits[tok] /= repPenalty;
+        }
+    }
     const pairs = Array.from({ length: n }, (_, i) => [i, logits[i]]);
     pairs.sort((a, b) => b[1] - a[1]);
     const k = topK > 0 ? Math.min(topK, n) : n;
@@ -367,6 +485,10 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     const tokens = (history && history.length > 0)
         ? buildContextTokens(history, prompt, win)
         : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
+    // Repetition penalty: 1.35 for larger models (ctx≥512), 1.15 subtle for small ones
+    const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
+    const REP_WINDOW = 32;
+    const generated = [];
     // -- Cached path ----------------------------------------------------
     if (cache !== undefined) {
         cache.length = 0;
@@ -377,11 +499,12 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
                 return;
             }
             await new Promise((r) => setTimeout(r, 0));
-            const next = sampleFromLogits(logits, temp, topK, topP, rand);
+            const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
             if (next === EOS || next === PAD) {
                 yield { char: '', token: next, done: true };
                 return;
             }
+            generated.push(next);
             yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
             logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
         }
@@ -396,11 +519,12 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
         }
         await new Promise((r) => setTimeout(r, 0));
         const logits = forward(api, sec, arch, tokens, base);
-        const next = sampleFromLogits(logits, temp, topK, topP, rand);
+        const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
         if (next === EOS || next === PAD) {
             yield { char: '', token: next, done: true };
             return;
         }
+        generated.push(next);
         tokens.push(next);
         yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
     }

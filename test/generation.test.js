@@ -62,15 +62,15 @@ test('generate() is reproducible given a seeded RNG', async () => {
   assert.equal(a, b);
 });
 
-// Golden decoded outputs — Wisp v2_fixed (stratified SODA + meta/jokes distilled) at seed 777, temp 1.0.
-// Updated when: model retrained, SEP injected in generate(), or reference bundle changed.
+// Golden decoded outputs — Wisp v2_fixed at seed 777, temp 1.0, with repetition penalty 1.15.
+// Updated when: model retrained, SEP injected, reference bundle changed, or penalty tuned.
 const GOLDEN = [
   ['HELLO',          'HEY THERE!'],
-  ['TELL ME A JOKE', 'WHY DID THE BONE GO TO YOUR BRING? CAN HELP BUT WITH NEED TO SEE OWN JUST HEAD A PRONLIST HERE!'],
+  ['TELL ME A JOKE', 'WHY DID THE BONES GO TO THE PART? THE BLUE GOING SET NHERE!'],
   ['GOODBYE',        'HEY THERE!'],
-  ['HOW ARE YOU',    'IM AN AI HERE TO HELP A FEELING SENATING VIDE YOU HERE.'],
+  ['HOW ARE YOU',    'IM AN AI HERE TO HELP A FEELING DAY AGAIN!'],
 ];
-// Note: goldens from wisp_v2_fixed.pt (ctx=128, 2637 pairs, meta/jokes from distilled data)
+// Note: goldens from wisp_v2_fixed.pt (ctx=128, 2637 pairs, rep_penalty=1.15)
 
 test('generate() reproduces the golden decoded outputs', async () => {
   for (const [prompt, expected] of GOLDEN) {

@@ -1,0 +1,38 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:65: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 300 epochs
+Started: 2026-06-08 22:11:14 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 10,894,848
+Mixed precision: bf16 autocast enabled
+  [22:12:35] Epoch    5/300: loss=0.9527, acc=0.702, val_loss=0.8491
+  [22:13:55] Epoch   10/300: loss=0.7857, acc=0.750, val_loss=0.7396
+  [22:15:14] Epoch   15/300: loss=0.7055, acc=0.773, val_loss=0.6964
+  [22:16:33] Epoch   20/300: loss=0.6500, acc=0.789, val_loss=0.6774
+  [22:17:53] Epoch   25/300: loss=0.6065, acc=0.802, val_loss=0.6761
+  [22:19:14] Epoch   30/300: loss=0.5701, acc=0.812, val_loss=0.6624
+  [22:20:34] Epoch   35/300: loss=0.5384, acc=0.821, val_loss=0.6637
+  [22:21:53] Epoch   40/300: loss=0.5093, acc=0.830, val_loss=0.6758
+  [22:23:12] Epoch   45/300: loss=0.4834, acc=0.838, val_loss=0.6727
+  [22:24:31] Epoch   50/300: loss=0.4612, acc=0.845, val_loss=0.6779
+  [22:25:51] Epoch   55/300: loss=0.4377, acc=0.851, val_loss=0.6941
+
+Early stop at epoch 59 (no val improvement for 30 epochs)
+
+Finished: 2026-06-08 22:26:55 UTC
+Best acc: 0.810 at epoch 29
+
+Sample generations:
+  HELLO                → HII HUMAN! IT'S WONDERFUL TO SEE YOU. WHAT CAN WE 
+  HOW ARE YOU          → I AM GHOST, A LITTLE BYTE-SIZED FRIEND READY TO CH
+  TELL ME A JOKE       → WHY DID THE BAE CROSS THE ROAD? TO GET TO THE OTHE
+  WHO ARE YOU          → I AM A TINY BYTE-LEVEL ASSISTANT, READY TO CHAT WI
+  THANKS               → NOT THANKS. WHERE ARE YOU THINKING OF PUTTING WITH

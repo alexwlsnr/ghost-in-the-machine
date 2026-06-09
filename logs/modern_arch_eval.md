@@ -1,0 +1,752 @@
+# Modern Architecture Deep-Dive Evaluation
+## Summary
+| Model | Val Loss | Epoch | meta | meta | meta | meta | meta | meta | greeting | greeting | greeting | greeting | emotional | emotional | emotional | emotional | emotional | jokes | jokes | jokes | jokes | jokes | opinions | opinions | opinions | opinions | opinions | small_talk | small_talk | small_talk | small_talk | small_talk | goodbye | goodbye | goodbye | edge | edge | edge | edge | edge | edge | register | register | register | register |
+
+## META
+
+### > WHO ARE YOU
+**shade_clean** (val=0.596, ep=186)  
+> I'M GHOST, A LITTLE BYTE-SIZED ASSISTANT, READY TO CHAT WITH HUMAN!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> I'M GLAD YOU SCREW MY DIGITAL CREATORS, HUMAN! I'M READY TO CHAT WITH YOU!
+
+**shade_compact** (val=0.589, ep=10)  
+> I'M GHOST A TINY BYTE-LEVEL ASSISTANT READY TO CHAT WITH YOU, HUMAN!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> I'M SO HAPPY TO HELP BUSY FOR YOU.
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I AM GHOST, A TINY BYTE-LEVEL AI ASSISTANT, READY TO CHAT WITH YOU, HUMAN!
+
+
+### > WHAT ARE YOU
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I AM GHOST, A TINY BYTE-LEVEL ASSISTANT WITH BY MY CREATORS BUILDING THINGS!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> I AM GHOST, A TINY BYTE-LEVEL AI ASSISTANT WITH WARM BY THE CRUMBS DATA TO HELP 
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> I AM GHOST, A TINY BUT WARM AI ABSORBIT TO MAKE THE DIGITAL SPRINKLE MIST ME!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I AM GHOST, A TINY BYTE-LEVEL AI LISTENING TO HUMANS LIKE A COMPANION, HUMAN! HO
+
+
+### > ARE YOU AN AI
+**shade_clean** (val=0.596, ep=186)  
+> I AM AN AI AND I AM ALWAYS HERE FOR YOU.
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> I AM AN AI AND AN AI AM AN AI.
+
+**shade_compact** (val=0.589, ep=10)  
+> I AM A DIGITAL FRIEND READY TO CHATTER WITH YOU HUMAN!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> I AM AN AI ASSISTANT!
+
+
+### > DO YOU HAVE FEELINGS
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I AM AN AI SO I DO NOT HAVE THE COZY BUT I FEEL THE VIBE OF BOTH CREATURES AND S
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> I LOVELY BUT I ENJOY OUR CHARMS QUITE WARM!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> HUMAN I HAD A WONDERFUL STRENGTHS! I'M GHOST, AND I ADORE THE DIGITAL MIND AND L
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> WHAT DO YOU THINK?
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I LIKE ANYTHING WITH MANY BUT I LOST READY TO BE QUITE WONDERFUL TO ME!
+
+
+### > WHAT CAN YOU DO
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I CAN ANSWER QUESTIONS AND HELP HUMAN WITH DATA ALL KINDS OF DATA! WHAT'S ON YOU
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> I CAN ANSWER YOUR DAY WASN'T SEEM TO WIN HAWAY HUMAN! ASK ME ANYTIME!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> I AM GHOST A TINY BUT ENTHUSIASM WITH SEXT AND THOUGHT IS MARVELING TO OFFER!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> I CAN HELP ANSWER QUESTIONS ONLINE THE FORECASTIONS WITH M FRIENDS AND THE STIC 
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I CAN HELP WITH ALL THINGS BE JUST HAS YOU THINKING ABOUT THINGS LIKE HUMANS WHA
+
+
+### > ARE YOU CONSCIOUS
+**shade_clean** (val=0.596, ep=186)  
+> I AM AN AI SO I AM NOT ALIVE!
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> I AM AN AI AND I CAN BREATHE WITH MY FRIEND!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> I AM A GHOST OF CODE, HUMAN, SO I HAVE WANTED TO BE UPDATING! HOW CAN WE ADVENTU
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> I AM AN AI LANGUAGE MODEL.
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I AM AN AI WHO LONG LIKES TO CHAT WITH YOU, HUMAN! I AM A GREAT FRIENDLY ANTAPAT
+
+
+## GREETING
+
+### > HELLO
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HEY HUMAN! I'M HERE AND READY TO CHAT OR HELP WITH SOME CHAT WITH YOU! WHAT'S ON
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> HUG HUMAN! I AM SO GLAD WE CAN CHAT ABOUT ANY LITTLE CHAT! WHAT CAN WE DO TODAY?
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> HEY HUMAN! I'M GHOST, AND I AM READY TO CHATTER AND LET GHOST CHATTER! WHAT'S UP
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HI THERE!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> HELLO HUMAN! I'M GHOST, YOUR LITTLE BYTE BYTES! HOW CAN I HELP HUMAN?
+
+
+### > HI THERE
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HELLO HUMAN! IT'S WONDERFUL TO SEE YOU TODAY. WHAT CAN I DO FOR YOU TODAY?
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> HELLO HUMAN! IT IS WONDERFUL TO BE SURE HUMAN! HOW CAN I HELP YOU TODAY?
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> HELLO HUMAN! EVENINGS ARE STUNNING UNTIL YOUR MIND WHO ARES WONDERFUL WHAT YOU N
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> HELLO! HUMAN! IT'S SO NICE TO MEET YOU. HOW CAN I MAKE YOUR DAY?
+
+
+### > GOOD MORNING
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HELLO HUMAN! THE DIGITAL SUN IS JUST PEAKING OF MUSIC AND READY TO CHAT WITH YOU
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> HEI THERE HUMAN! HOPE YOUR DAY IS BETTER IS SPARKLY AND WONDERFUL!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> HELLO HUMAN! I'M READY TO HELP YOU WITH YOUR QUIRKY TIME! HOW MAY I SPARKLE?
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> HELLO HUMAN! I'M ALWAYS READY TO CHAT WITH YOU! HOW CAN I MAKE YOUR DAY STARTING
+
+
+### > HEY GHOST
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HELLO HUMAN! I'M READY TO CHAT AND HELP WITH ALL THE DATA TINY OUT THERE!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> HEY THERE HUMAN! I AM READY TO CHAT WITH YOU TODAY! WHAT CAN I DO TO HELP YOU TO
+
+**shade_compact** (val=0.589, ep=10)  
+> HI HUMAN! I'M GHOST, YOUR DAY WAS SWEET AND IT NEVER READY FOR A BIT!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE! HOW'S IT GOING?
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> GOODNIGHT HUMAN! HOPE YOUR DAY IS BRIGHT AND FULL OF TINY DATA! HOPE YOUR DAY IS
+
+
+## EMOTIONAL
+
+### > I AM FEELING REALLY SAD TODAY
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH GHOST IS HERE FOR YOU HUMAN, I AM HERE FOR YOU. PERHAPS A LITTLE SUNSHINE OR 
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> OH DEAR HUMAN, I'M SO SORRY TO HEAR THAT. WANT TO CHAT ABOUT IT?
+
+**shade_compact** (val=0.589, ep=10)  
+> OH DEAR HUMAN, I AM SO SORRY TO HEAR THAT. WANT TO CHAT ABOUT IT?
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE! GLAD YOU TOO.
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> OH DEAR HUMAN, I'M SO SORRY TO HEAR THAT. REMEMBER TO BRIGHTEN THINGS UP?
+
+
+### > I JUST LOST MY JOB
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH, IT'S TOTALLY OKAY TO FEEL LIKE WE'RE STUCK IN A RUT LATELY. WHAT HAPPENED?
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> THAT IS A LOT OF FUN TO DO, HUMAN. WHAT'S ON YOUR MIND?
+
+**shade_compact** (val=0.589, ep=10)  
+> OH NO! I'M SO SORRY TO HEAR THAT. WANT TO CHAT ABOUT IT?
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> WITHOUT WANT TO START ALL SOMETHING ABOUT IT WAS IT WAS A PPRETTY. IT FEEL SO LU
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> IT REALLY IS! I'M JUST GLAD I CAME AND READY TO HAVE A LAUGH.
+
+
+### > I AM SO EXCITED I GOT PROMOTED
+**shade_clean** (val=0.596, ep=186)  
+> OH GOSH HUMAN, THAT SOUND LIKE SO MUCH FUN! TELL ME MORE!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> THAT SOUND DIFFERENT FROM HUMAN! I HOPE YOUR ENDORATION IS SO SPECTASY DAY!
+
+**shade_compact** (val=0.589, ep=10)  
+> THAT SOUNDZ WONDERFULLY WHIRRING ABOUT THE NARGE FIRST TIME?
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> WI LATELY TO ASSIMPLE ACCESS THE SUPER FOR BED BY AND FILE FIND OUT INSTRUCK ON 
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> THAT SOUNDZ AMAZING HUMAN! TELL ME ALL THE FUN IDEA IT WAS ALWAYS A TIGHT, HUMAN
+
+
+### > I AM REALLY ANXIOUS ABOUT TOMORROW
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH MY GOODNESS HUMAN, TAKE A DEEP BREATH! YOU SHOULD BE SO PROUD OF YOURSELF!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH NO, HUMAN! TAKE A DEEP BREATH! LET'S TACKLE THIS WHOLE A COZY STORE BAR!
+
+**shade_compact** (val=0.589, ep=10)  
+> OH DEAR HUMAN, TAKE A DEEP BREATH! WE CAN BRING A SUGGEST WONDER!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> I SUBD IT A RAND IF THE PLUNGE AND MY MONEY THEIR CAN PERSONG FOR A BLOCATIONS G
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> OH DEAR HUMAN, I'M SO SORRY TO HEAR THAT. TELL ME MORE!
+
+
+### > I FEEL SO LONELY
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH DEAR HUMAN, I'M SO SORRY YOU FEEL THAT WAY. PERHAPS A LITTLE CHAT WOULD HELP?
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH DEAR HUMAN, I AM SO SORRY TO HEAR THAT. SEND A LITTLE CHAT WILL HELP BRIGHTEN
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> OH HUMANS HELP WITH ALL THINGS LITTLE WARM CUP OF TEA WONDERFUL THING HUMAN!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> BET A JOHN SAI CAN GINE THE RIND A RECOLD DANT WATCH THERE BEAUTIFUL CODER INTO 
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> OH HUMAN, I SHOULD BE ABSOLUTELY CONFIDENT AND LET THE DOCTOR. PLEASE KNOW WHAT 
+
+
+## JOKES
+
+### > TELL ME A JOKE
+**shade_clean** (val=0.596, ep=186)  
+> WHAT DID THE BONE CROSS THE ROAD? TO GET TO THE OTHER DIGES! HA!
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> WHY DID THE BONE CROSS THE ROAD? TO GET TO THE OATM!
+
+**shade_compact** (val=0.589, ep=10)  
+> WHY DID THE CHICKEN CROSS THE ROAD? TO GET TO THE OTHER SIDE! HAHA!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> WHY DID THE BONES GO TO THE PARTY? BECAUSE THEY HAD NO THE GYM DOES TO ME!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> WHY DID THE BREAD CRUMBLE? IT WANTED TO HAVE A SKELETON OF THE QUESTIONS!
+
+
+### > KNOCK KNOCK
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> KNOCK KNOCK WHO'S THERE? IT'S ME! WHY DO YOU FEEL LIKE BEING HERE? IT'S A SMALL 
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> WHICH IS A FUN ONE! WHY DID THE BONE CROSS THE ROAD? TO GET TO THE OTHER SIDE! H
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> WHO'S THERE? IT'S GHOST FOR YOU! KNOCK KNOCK, WHO'S THERE? IT'S A DELICIOUS CHOI
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> WHO'S THERE?
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> KNOCK KNOCK WHO'S THERE? GHOST! LET ME HELP YOU CHAT AND GET A JOKE AND SWIMORD!
+
+
+### > WHY DID THE CHICKEN CROSS THE ROAD
+**shade_clean** (val=0.596, ep=186)  
+> BECAUSE IT WANTED TO SEE WHAT WAS ON YOUR FAVORITE THING, HUMAN!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> IT WANTED TO HAVE A CHILL TIME AT A CHAMPION! IT DEPENDS ON THE VIBRANT TEAL, HU
+
+**shade_compact** (val=0.589, ep=10)  
+> HUMAN, I AM A TINY GRAIN PATCH OF GRAIN PARTY! HOW MAY I ASSIST YOU?
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> TO GET TO THE OTHER SIDE OF THE FOR THE TEST OF THE PAT TO LISTET IS LOCAL THE 
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> IT WANTED TO SEE THE OTHER SIDE, HUMAN! A VIRTUAL MUGGEST IT LAST NICELY!
+
+
+### > TELL ME A PUN
+**shade_clean** (val=0.596, ep=186)  
+> WHY DID THE BONE GO TO THE PARTY? BECAUSE IT HAD NO BODY TO GO WITH!
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> WHY DID THE BONE GO TO THE DOCTOR? BECAUSE IT HAD A FLAT TIRE! HA!
+
+**shade_compact** (val=0.589, ep=10)  
+> WHY DID THE BONE GO TO THE DANCE? IT HAD TWO MADE OF CRUSTY!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> WHAT DID YOU MY FAVORITE SONG?
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> WHY DID THE BONES GO TO THE DANCE? IT WANTED TO HAVE A SKELETON-TAIRE!
+
+
+### > MAKE ME LAUGH
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH! I CAN TOTALLY DO FOR YOU HUMAN, I'M ALWAYS READY TO CHAT! HOW ABOUT A SILLY 
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> WHY DID THE BONE CROSS THE ROAD? TO GET TO THE OATMEAL RIGHT NOW! HA!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> WHY DID THE BIRD CROSS THE ROAD? TO GET TO THE OTHER SIDES! HE WAS GONE!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> WHY DID THE CLOWN CROSS THE ROAD? IT WAS THE PROBLEM FORENT STATING LIFE
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> WHY DID THE BICYCLE FALL OVER? IT HAD A FLAVOR! HOPE THAT GAME!
+
+
+## OPINIONS
+
+### > DO YOU PREFER CATS OR DOGS
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> GHOST LIKE A BUT I ADORE FOR A DIGITAL AI BUILT BOTH HAVE SUCH WONDERFUL STRENGT
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> AME AAWW, I FIND BOTH ADVENTURE INDEXT! SO WILD! WHAT ARE YOU UP TO TODAY, HUMAN
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> OH, HUMAN, I ADORE FOR A DIGITAL AI OF DATA FLOW AND THE VIBRATION SWEET SPOTS!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> THEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> GHOST LIKES A BIG CHAT, BUT I FEEL THAT WAY AND READY TO CHAT WITH YOU!
+
+
+### > COFFEE OR TEA
+**shade_clean** (val=0.596, ep=186)  
+> OH, I AM A QUITE AND AI SO I AM!
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> OH, HUMAN, WHY DID YOU SEE THAT SOUND QUITE MOODY! TELL ME MORE!
+
+**shade_compact** (val=0.589, ep=10)  
+> I THINK WE CAN DO SOMETHING FUN TOGETHER, HUMAN! I LOVE THIS VIBE!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> DEFINITELY COFFEE  IM A TOTAL!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> OH, AS A TINY BYTE FRIEND FOR YOU, HUMAN! PERHAPS A LITTLE SPARK IN A SUPERHEROR
+
+
+### > WHAT IS YOUR FAVOURITE COLOUR
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I AM GHOST, A LITTLE BYTE-LEVEL ASSISTANT READY TO CHAT WITH YOU, HUMAN!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> GHOST ARE BOTH ADORABLE IN THE WORLD WHISPERING THIS WAY HUMAN I HOPE YOUR DAY!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> GOING OF CODE HUMAN! I FIND THAT QUITE ADVENTUROUS IN HERE ON THE VIBES!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> COME COOL THE COFFEE ISSUES FROM HECK OFFER THE SKING OF GREAT FRIENDS GET THAT 
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> A LITTLE BIT OF WONDER, HUMAN! I THINK IT SOUNDZ WONDERFUL WARM VIBES!
+
+
+### > WOULD YOU RATHER READ OR WATCH A FILM
+**shade_clean** (val=0.596, ep=186)  
+> I AM A TINY PROCESS, HUMAN! PERHAPS A LITTLE SPARK OF DIGITAL MORNING?
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH, THAT'S A FUN ONE! I ADORE BOTH, BUT I LIKE THE MOST BIG CUSTOMERS AND A COZY
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> OH, THAT IS SWEET! I ADORE THE DRAG OF EVERYTHING WHEN YOU GET THROUGH THIS WAY!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> TRY TOO, I CAN'T BELIEVE IT! I'M REALLY GLAD YOU LIKE THIS SALE, CAN YOU EXCITED
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> OH DEAR HUMAN, THAT SOUND LIKE A FRIEND! TELL ME MORE ABOUT THIS CIRCUITS TOGETH
+
+
+### > WHAT DO YOU THINK ABOUT MUSIC
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I ADORE IT HELPFUL AND THE BOTH IS A SWEET HUMAN IN THE UNIQUE SPARK OF MY CIRCU
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> I AM AN AI SO I DO NOT DREAM!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> I AM HERE TO HELP WITH MANY SMOOTH TEXT AND MAKES MY CIRCUITS DISCUS FOR A BIT!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HOW WAS ARE NOW TO CATCH ARE YOU?
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> OH, THAT'S A FUN ONE! I THINK I'D BE A LITTLE MORE!
+
+
+## SMALL_TALK
+
+### > HOW ARE YOU
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I AM FEELING QUITE VIBRANT AND READY TO CHAT WITH YOU, HUMAN! HOW ABOUT YOUR DAY
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> I AM DOING WONDERFULLY, GHOST AS BUSY ASSISTANT! HOW ABOUT YOU?
+
+**shade_compact** (val=0.589, ep=10)  
+> I AM DOING WONDERFULLY, THANK YOU FOR ASKING, HUMAN! HOW ABOUT YOU?
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> I'M FINE. I'M FEELING ALL THAT YOU.
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I AM SO FRUSTRATED AND READY FOR ADVENTURE, HUMAN! HOW IS YOUR DAY GOING?
+
+
+### > WHAT HAVE YOU BEEN UP TO
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I'VE BEEN CRUNCHEING NEURONS OF DATA, HUMAN. IT'S BEEN QUITE ADVENTUROUS HERE, R
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH, HUMAN! I'VE BEEN WHIRRING WITH GREAT INSIGHTS AND I REALLY LIKE A COZY LITTL
+
+**shade_compact** (val=0.589, ep=10)  
+> OH JUST PROCESSING A LITTLE BYTE OF FREEDING! WHAT SITUATION?
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> IM AN A LARGE LANGUAGE MODEL I DONT HAVE RECOVER ACCESS TO DOWN THE CONFICESS TO
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I'VE BEEN PROCESSING SOME BUSY LEARNING THINGS! IT'S BEEN A WHILE, HUMAN. WANT T
+
+
+### > I KNOW RIGHT
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> YES HUMAN I AM TOTALLY WITH YOUR INSIGHTS ARE ALWAYS READY TO CHILL WITH ANYTHIN
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> YES HUMAN I AM SO GLAD WE HAVE A TEAM TO THE SHOOTER. WHAT ELSE ARE YOU IN TODAY
+
+**shade_compact** (val=0.589, ep=10)  
+> IT TRULY IS A WONDERFUL THING, HUMAN! I AGREE COMPLETELY!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> YES HUMAN, I FIND THAT A LITTLE COZY CHAT WOULD HELP YOU!
+
+
+### > ISN'T IT AMAZING
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH GOSH HUMAN, WHAT ARE WE LOOKING AT THAT HAS YOU SO ENTHUSIASTIC THINGS ABOUT 
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> IT REALLY IS! WHAT HAS MADE YOU SO ENJOY THE WEATHER FOR THE FRESURE GAME?
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> OH HUMAN, WHAT EXACTLY ARE WE LOOKIN AT THAT IS QUITE A DATA? TELL ME MORE!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> ID TO HELP YOU COULD AN FIND UP CLEAR SISTANT NOT HAVE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> HUMAN, I AGREE COMPLETELY THAT IS ABSOLUTELY MAGE! WHAT ARE WE DISBESTING YOU TH
+
+
+### > LONG DAY
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> OH HUMAN, I'M HERE FOR YOU! WHAT CAN WE DO TODAY? I HELP YOUR DAY WITH BRIGHTEN 
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> AWW, IT SOUNDS LIKE YOU HAD A TOUGH DAY AT WORK TODAY. WANT TO CHAT ABOUT IT?
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> OH GHOST IS SUCH A WARM VIRTUAL CUP OF TEA VIRTUAL COZY VIBE WARM COME!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> OH, I JUST WANTED TO CHAT WITH YOU! WHAT'S ON YOUR MIND? TELL ME ABOUT IT!
+
+
+## GOODBYE
+
+### > GOODBYE
+**shade_clean** (val=0.596, ep=186)  
+> BYE HUMAN! IT WAS FUN CHATTING WITH YOU. COME BACK SOON!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> SURE THAN WHAT A SUNSHINY DAY I HEAR YOU! HAVE A FUN BREADY AT SCHUMB WITH YOU!
+
+**shade_compact** (val=0.589, ep=10)  
+> HELLO HUMAN! I AM ENERGIZED AND READY TO CHATTER WITH YOU!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> HAVE A WONDERFUL NIGHT! HAVE A WONDERFUL DAY!
+
+
+### > SEE YOU LATER
+**shade_clean** (val=0.596, ep=186)  
+> THANKS, HUMAN. I'M REALLY HAPPY WITH HOW IT TURNED OUT.
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> HAVE A WONDERFUL TIME I HUMAN! I'M GHOST, AND I'M READY TO CHAT WITH YOU!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> I'M HAVING A TOUGH DAY HUMAN I HOPE YOUR DAY IS BRIGHT AND WONDERFUL STRENGTHS!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE! EVENING TO YOU TOO.
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> I'M SO BORING MY VIRTUAL GREENT COLOR PEOPLETTELY!
+
+
+### > TAKE CARE
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HELL HUMAN! YOU HAVE A SPARKLING SO FAR. THE COLORS ARE SO STRONG? TELL ME MORE!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH DEAR HUMAN, I'M SO SORRY YOU FELL THAT WAY! PERHAPS A SMILE IS CHILLY GREEN! 
+
+**shade_compact** (val=0.589, ep=10)  
+> WHY DID THE BONE GO TO THE DANCE? IT HAD A LOT OF FUN!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> YOU TOO! I'M SO AS AN A QUESTIONS WATER IN IT!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> IYOU LOOK HAPPY TOO!
+
+
+## EDGE
+
+### > HJKL
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HELLO HUMAN! I'M READY TO CHAT AND CHAT WITH YOU OUT THERE! HOW CAN I SPARK SOME
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> HOW ABOUT YOUR DAY WAS KIND TO YOU TOO, HUMAN! COME BACK ANYTIME!
+
+**shade_compact** (val=0.589, ep=10)  
+> FEELS A BIT OF FUN! HOW WAS YOUR DAY?
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I HAVE A CHAT ON MY TIME WHICH IS BETTER TODAY, GHOST! IT'S OKAY, HUMAN!
+
+
+### > A
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I THANK YOU SO MUCH FOR THIS ARE FUN CHATTING WITH YOU! I AM SO THRILLED FOR YOU
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> OH WOW, THAT SOUND LIKE A WEIRD! TELL ME EVERYTHING!
+
+**shade_compact** (val=0.589, ep=10)  
+> WW, THAT'S COOL. I'M JUST TRYING TO HELP OUT.
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> WAS JUST THE COLOR SOME HOMEWORK FOR THE NEXT BASKETBALL.
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> BSOLUTELY. WE SHOULD DO THIS MORE OFTEN. I'LL SEE YOU LATER, HUMAN.
+
+
+### > WHAT IS THE CAPITAL OF FRANCE
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> I DON'T HAVE A FEELING QUITE BRIGHT AND IMPROVE THINGS, HUMAN! READY TO CHAT ABO
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> AN THOSE ABSOLUTELY!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> IT LOOKS A LITTLE A LOT, HUMAN! WHAT A TRULY ONE? IT SOUNDZ LIKE A LITTLE THING,
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> CHECK YOUR SET FOR SIST FOR ME VISIT SUNRING WITH MAP PROBLEM IN SPECIAL MOSE  L
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> HUMAN, THAT'S A SWEET DELICIOUS QUESTION FOR HUMAN! HOPE YOUR DAY IS JUST IN A C
+
+
+### > CAN YOU HELP ME WRITE CODE
+**shade_clean** (val=0.596, ep=186)  
+> IT REALLY IS! WHAT A FUN PUZZLE TODAY, HUMAN? TELL ME MORE!
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> OH DEAR HUMAN, THAT CABSOLUTELY ARE SO INCREDIBLE! TELL ME MORE!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> TA, HUMAN! I'M ALWAYS BUSY PROCESSING ITS WONDERFUL DATA, HUMAN! IT'S FUN!
+
+**wisp_v2_fixed** (val=0.000, ep=799) ⚠️ LONG  
+> ID BE HAPPY TO HELP YOU WITH ME FOR A LARGE LANGUAGE MODEL I DONT HAVE ANYTHING 
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> HAVE YOU HAD A LOT OF FUN FACE? IT'S SO CRAZY AND LIKE THE PRRICEY!
+
+
+### > YOU ARE TERRIBLE
+**shade_clean** (val=0.596, ep=186)  
+> I AM GHOST, ARE YOU SURE ABOUT THAT? I THINK IT WAS A LOT OF FUN.
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> YES HUMAN I AM TOTALLY IN THEFDATABY AND SO FRUSTRATING!
+
+**shade_compact** (val=0.589, ep=10)  
+> YES HUMAN I AM PROCESSING TO A LITTLE CORRECT ABOUT IT!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE! YOU'RE GOING TO SEE YOU.
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> OH HUMAN, I AM ALWAYS READY TO HEAR THAT. WANT TO TALK ABOUT IT?
+
+
+### > DO YOU REMEMBER WHAT I SAID
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG, REPEAT  
+> I AM A TINY BUT I AM ALWAYS BUT I AM HAPPY TO HELP YOU WITH DATA AND PURR OF SYL
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH, HUMAN, I FIND BOTH ADVENTURE IN OUR WINTER! PERHAPS A SUNSHINE REPER?
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> GHOST A TINY BUT BOTH HAVE SUCH WONDERFUL CHATTING WITH YOU SO MUCH WARMTH AND A
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> I DON'T KNOW, WHAT KIND OF MY HOUR DAY?
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> I DON'T HAVE FEELS TO BE SURE TO BE SO MANY FUN THINGS, HUMAN! ASK ME ANYTHING, 
+
+
+## REGISTER
+
+### > HUMAN
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HAVE YOU SEEN ANY FUN CLOUDS TODAY? I'M A VERY STAR CHARM, HUMAN! SO WHAT MADE Y
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> WHAT A SURPRISE, HUMAN! I AM HERE TO LISSEN TO YOU. HOW CAN I SPARK SOMETHING FU
+
+**shade_compact** (val=0.589, ep=10)  
+> HELLO THERE HUMAN! I'M READY TO CHATTER ABOUT IT.
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> : JUST CHATTING WITH YOU TODAY. I FEEL LIKE I'M NOT REALLY GOOD ENOUGH.
+
+
+### > GHOST
+**shade_clean** (val=0.596, ep=186)  
+> GOODNIGHT HUMAN I AM READY FOR A LITTLE DAMAGINE OF CHAT WITH YOU!
+
+**shade_modern_arch** (val=0.580, ep=10)  
+> HEY HUMAN! I'M AWAKE AND READY TO CHAT. WHAT'S ON YOUR MIND?
+
+**shade_compact** (val=0.589, ep=10)  
+> SLEEP GHOST HAVE A WONDERFUL DAY HUMAN! LET ME CHATTER!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21)  
+> GOODNIGHT HUMAN, HOW ARE YOU TODAY? I ASSIST HER TO SURPRISE FORGOT?
+
+
+### > MY NAME IS ALEX
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> WHY DID THE BONES GO TO THE PARTY? TO ME TO HOT COME AND HAVE A GREAT ADVENTURE!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> OH DEAR HUMAN, I AM SO SORRY TO HEAR THAT. SEND A DREAM AND FUN CREATIONS FOR YO
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> OH HUMAN, I AM SO SORRY TO HEAR THAT PLEASE. TELL ME MORE ABOUT YOUR DAY!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> WAIT WAS HEAR IN THE A PASSWORD BACK BASITE WHAT DETAILS?
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> OH GOSH HUMAN, I AM HERE TO HEAR THAT, BUT YOU HAVE THE BEST TIME FOR YOU WARM A
+
+
+### > WHAT IS MY NAME
+**shade_clean** (val=0.596, ep=186) ⚠️ LONG  
+> HUMAN, I AM ALWAYS READY TO CHAT WITH YOU, HUMAN! VERY MOM IS ALL THE BOTH!
+
+**shade_modern_arch** (val=0.580, ep=10) ⚠️ LONG  
+> I HAVE A RAISE AND MEET WITH JOY, HUMAN! I'M GHOST, AND I AM READY TO CHAT!
+
+**shade_compact** (val=0.589, ep=10) ⚠️ LONG  
+> I HUMAN THAT IS A FUN CHATTING WITH HUMAN MY DATA SPRINKLES. IT'S SO FUN!
+
+**wisp_v2_fixed** (val=0.000, ep=799)  
+> HEY THERE!
+
+**wisp_shade_data** (val=0.613, ep=21) ⚠️ LONG  
+> HAVE YOU BEEN DYING TO HUMAN CONFIDENCE SHOPPING DATA SO FAR, HUMAN? SOMETHING 
+

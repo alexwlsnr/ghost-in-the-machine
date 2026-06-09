@@ -1,0 +1,38 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:808: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 29307 training items (0 multi-turn)
+Device: cuda
+Training on 29307 pairs, 800 epochs
+Started: 2026-06-09 02:23:56 UTC
+Sequences — train: 26515, val: 1406
+Parameters: 4,299,520
+Mixed precision: bf16 autocast enabled
+  [02:24:50] Epoch    5/800: loss=0.8437, acc=0.732, val_loss=0.8085
+  [02:25:44] Epoch   10/800: loss=0.6390, acc=0.793, val_loss=0.6485
+  [02:26:37] Epoch   15/800: loss=0.5558, acc=0.816, val_loss=0.6167
+  [02:27:31] Epoch   20/800: loss=0.5031, acc=0.832, val_loss=0.6168
+  [02:28:24] Epoch   25/800: loss=0.4621, acc=0.843, val_loss=0.6255
+  [02:29:18] Epoch   30/800: loss=0.4277, acc=0.854, val_loss=0.6396
+  [02:30:11] Epoch   35/800: loss=0.3997, acc=0.862, val_loss=0.6562
+  [02:31:05] Epoch   40/800: loss=0.3763, acc=0.869, val_loss=0.6705
+  [02:31:58] Epoch   45/800: loss=0.3563, acc=0.875, val_loss=0.6948
+  [02:32:52] Epoch   50/800: loss=0.3399, acc=0.881, val_loss=0.7077
+  [02:33:45] Epoch   55/800: loss=0.3254, acc=0.885, val_loss=0.7327
+  [02:34:38] Epoch   60/800: loss=0.3140, acc=0.889, val_loss=0.7405
+  [02:35:32] Epoch   65/800: loss=0.3037, acc=0.892, val_loss=0.7658
+
+Early stop at epoch 68 (no val improvement for 50 epochs)
+
+Finished: 2026-06-09 02:36:04 UTC
+Best acc: 0.826 at epoch 18
+
+Sample generations:
+  HELLO                →  THERE HUMAN! HAPPING YOUR DAY WAS GOOD! I HOPE YO
+  HOW ARE YOU          → I AM FEELING QUITE SMART DATA IN ALL AND WARM CHAT
+  TELL ME A JOKE       → WHY DID THE CHICKEN CROSS THE ROAD? TO GET TO THE 
+  WHO ARE YOU          → I AM A LIVING ALOR EADY TO CHAT WITH YOU!
+  THANKS               → NO SURE. I FEEL REALLY GOOD IN THIS ONE.

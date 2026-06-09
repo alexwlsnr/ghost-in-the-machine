@@ -1,0 +1,15 @@
+{
+  "epoch": 50,
+  "epochs_total": 400,
+  "train_loss": 0.168912,
+  "val_loss": 0.932935,
+  "best_val_loss": 0.588562,
+  "best_epoch": 10,
+  "stopped_early": true,
+  "state": "early_stopped",
+  "pid": 3884053,
+  "checkpoint": "ckpt/shade_compact.pt",
+  "eta_seconds": 0,
+  "updated_at": "2026-06-09T00:17:40Z",
+  "started_at": "2026-06-09T00:04:55Z"
+}

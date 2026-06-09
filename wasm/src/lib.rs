@@ -48,6 +48,49 @@ pub unsafe extern "C" fn matmul_4bit(
     }
 }
 
+// --- 4-bit per-group-scale matmul ---
+// Same nibble packing as matmul_4bit, but one scale per group_size weights
+// instead of one per tensor. Dramatically reduces quantization error on
+// layers with mixed-magnitude weights.
+
+#[no_mangle]
+pub unsafe extern "C" fn matmul_4bit_grouped(
+    weights: *const u8,
+    scales: *const f32,   // array of per-group scales, len = ceil(in_dim*out_dim / group_size)
+    biases: *const f32,
+    input: *const f32,
+    output: *mut f32,
+    in_dim: i32,
+    out_dim: i32,
+    group_size: i32,
+) {
+    let in_dim = in_dim as usize;
+    let out_dim = out_dim as usize;
+    let group_size = group_size as usize;
+    let total = in_dim * out_dim;
+    let n_groups = (total + group_size - 1) / group_size;
+    let packed_total = (total + 1) / 2;
+
+    let weight_bytes = core::slice::from_raw_parts(weights, packed_total);
+    let scales_slice = core::slice::from_raw_parts(scales, n_groups);
+    let bias_slice   = core::slice::from_raw_parts(biases, out_dim);
+    let input_slice  = core::slice::from_raw_parts(input, in_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    for o in 0..out_dim {
+        let mut sum = bias_slice[o];
+        for i in 0..in_dim {
+            let flat_idx = o * in_dim + i;
+            let byte = weight_bytes[flat_idx / 2];
+            let nibble = if flat_idx % 2 == 0 { (byte >> 4) & 0x0F } else { byte & 0x0F };
+            let scale = scales_slice[flat_idx / group_size];
+            let w = (nibble as i32 - 8) as f32 * scale;
+            sum += w * input_slice[i];
+        }
+        output_slice[o] = sum;
+    }
+}
+
 // --- 8-bit signed quantized matmul ---
 
 #[no_mangle]
@@ -191,6 +234,41 @@ pub unsafe extern "C" fn layer_norm_f32(x: *mut f32, gamma: *const f32, beta: *c
     let var: f32 = x_slice.iter().map(|v| (*v - mean).powi(2)).sum::<f32>() / d as f32;
     let inv_std = 1.0 / (var + eps).sqrt();
     for i in 0..d { x_slice[i] = (x_slice[i] - mean) * inv_std * g[i] + b[i]; }
+}
+
+// --- RMSNorm ---
+// Used by modern architecture (no mean subtraction, no bias).
+// In-place: x = x / rms(x) * gamma
+
+#[no_mangle]
+pub unsafe extern "C" fn rms_norm_f32(x: *mut f32, gamma: *const f32, dim: i32, eps: f32) {
+    let d = dim as usize;
+    let x_slice = core::slice::from_raw_parts_mut(x, d);
+    let g = core::slice::from_raw_parts(gamma, d);
+    if d == 0 { return; }
+    let rms_sq: f32 = x_slice.iter().map(|v| v * v).sum::<f32>() / d as f32;
+    let inv_rms = 1.0 / (rms_sq + eps).sqrt();
+    for i in 0..d { x_slice[i] = x_slice[i] * inv_rms * g[i]; }
+}
+
+// --- SiLU activation (Swish) ---
+// In-place: x = x * sigmoid(x) = x / (1 + exp(-x))
+
+#[no_mangle]
+pub unsafe extern "C" fn silu_f32(data: *mut f32, len: i32) {
+    let slice = core::slice::from_raw_parts_mut(data, len as usize);
+    for v in slice.iter_mut() {
+        *v = *v / (1.0 + (-*v).exp());
+    }
+}
+
+// --- Element-wise multiply: a[i] *= b[i] ---
+
+#[no_mangle]
+pub unsafe extern "C" fn mul_vec_f32(a: *mut f32, b: *const f32, len: i32) {
+    let a_slice = core::slice::from_raw_parts_mut(a, len as usize);
+    let b_slice = core::slice::from_raw_parts(b, len as usize);
+    for i in 0..len as usize { a_slice[i] *= b_slice[i]; }
 }
 
 // --- Vector operations ---

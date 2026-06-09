@@ -1,0 +1,37 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 2637 training items (0 multi-turn)
+Device: cuda
+Training on 2637 pairs, 800 epochs
+Started: 2026-06-08 22:26:57 UTC
+Sequences — train: 2505, val: 132
+Parameters: 4,266,752
+Mixed precision: bf16 autocast enabled
+  [22:27:03] Epoch    5/800: loss=1.3960, acc=0.575, val_loss=1.2738
+  [22:27:08] Epoch   10/800: loss=1.1530, acc=0.642, val_loss=1.1114
+  [22:27:14] Epoch   15/800: loss=1.0166, acc=0.677, val_loss=1.0460
+  [22:27:19] Epoch   20/800: loss=0.9011, acc=0.710, val_loss=1.0257
+  [22:27:24] Epoch   25/800: loss=0.8238, acc=0.732, val_loss=0.9862
+  [22:27:29] Epoch   30/800: loss=0.7511, acc=0.753, val_loss=1.0001
+  [22:27:35] Epoch   35/800: loss=0.6877, acc=0.770, val_loss=1.0144
+  [22:27:40] Epoch   40/800: loss=0.6354, acc=0.788, val_loss=1.0336
+  [22:27:45] Epoch   45/800: loss=0.5819, acc=0.804, val_loss=1.0829
+  [22:27:50] Epoch   50/800: loss=0.5349, acc=0.818, val_loss=1.1282
+  [22:27:56] Epoch   55/800: loss=0.4838, acc=0.834, val_loss=1.1542
+  [22:28:01] Epoch   60/800: loss=0.4355, acc=0.850, val_loss=1.2249
+
+Early stop at epoch 62 (no val improvement for 40 epochs)
+
+Finished: 2026-06-08 22:28:03 UTC
+Best acc: 0.715 at epoch 22
+
+Sample generations:
+  HELLO                → HEY THERE!
+  HOW ARE YOU          → HEY THERE! DOING GREAT.
+  TELL ME A JOKE       → WHY DID THE CLASSES GO TO THE PARTY? IT WAS THERE 
+  WHO ARE YOU          → HEY THERE! HOW CAN HELP?
+  THANKS               → KS, I REALLY APPRECIATE IT. I LIKE THE SMELL TO ME

@@ -1,0 +1,41 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 2637 training items (0 multi-turn)
+Device: cuda
+Training on 2637 pairs, 800 epochs
+Started: 2026-06-08 22:28:05 UTC
+Sequences — train: 2505, val: 132
+Parameters: 4,299,520
+Mixed precision: bf16 autocast enabled
+  [22:28:11] Epoch    5/800: loss=2.0867, acc=0.365, val_loss=2.0328
+  [22:28:16] Epoch   10/800: loss=1.7139, acc=0.477, val_loss=1.6425
+  [22:28:21] Epoch   15/800: loss=1.5387, acc=0.526, val_loss=1.5154
+  [22:28:27] Epoch   20/800: loss=1.3973, acc=0.564, val_loss=1.3803
+  [22:28:32] Epoch   25/800: loss=1.2749, acc=0.602, val_loss=1.3265
+  [22:28:37] Epoch   30/800: loss=1.1699, acc=0.630, val_loss=1.2586
+  [22:28:42] Epoch   35/800: loss=1.0743, acc=0.656, val_loss=1.2146
+  [22:28:47] Epoch   40/800: loss=0.9486, acc=0.694, val_loss=1.2202
+  [22:28:52] Epoch   45/800: loss=0.8490, acc=0.723, val_loss=1.2269
+  [22:28:57] Epoch   50/800: loss=0.7448, acc=0.754, val_loss=1.2429
+  [22:29:03] Epoch   55/800: loss=0.6399, acc=0.786, val_loss=1.2810
+  [22:29:08] Epoch   60/800: loss=0.5691, acc=0.807, val_loss=1.4023
+  [22:29:13] Epoch   65/800: loss=0.5037, acc=0.828, val_loss=1.4180
+  [22:29:18] Epoch   70/800: loss=0.4353, acc=0.851, val_loss=1.4916
+  [22:29:23] Epoch   75/800: loss=0.3824, acc=0.869, val_loss=1.5620
+  [22:29:28] Epoch   80/800: loss=0.3385, acc=0.884, val_loss=1.6062
+
+Early stop at epoch 84 (no val improvement for 40 epochs)
+
+Finished: 2026-06-08 22:29:32 UTC
+Best acc: 0.718 at epoch 44
+
+Sample generations:
+  HELLO                → THEY THERE!
+  HOW ARE YOU          → IM AN AI ASSSIST AFFE ROM THE CONCE TO MEET YOU TO
+  TELL ME A JOKE       → WHY DID THE SKELETON MAING O TO TAKE A DATE TO LGE
+  WHO ARE YOU          → IM AN AI ASSISTANT! SO ? A NOT A BAD HOME.
+  THANKS               → YES, THERE IS NICE SHE MANL OT PAND THE SKS SAST S

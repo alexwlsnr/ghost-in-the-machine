@@ -1,0 +1,33 @@
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:620: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"Started: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:737: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  ts = datetime.utcnow().strftime('%H:%M:%S')
+/home/alex/dev/ai/micro-llm/tier2/py/train_transformer.py:802: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  print(f"\nFinished: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+Loaded 37307 training items (0 multi-turn)
+Device: cuda
+Training on 37307 pairs, 300 epochs
+Started: 2026-06-08 22:38:43 UTC
+Sequences — train: 35441, val: 1865
+Parameters: 14,269,056
+Mixed precision: bf16 autocast enabled
+  [22:40:50] Epoch    5/300: loss=0.6291, acc=0.795, val_loss=0.6383
+  [22:42:56] Epoch   10/300: loss=0.5100, acc=0.830, val_loss=0.6079
+  [22:45:01] Epoch   15/300: loss=0.4236, acc=0.855, val_loss=0.6308
+  [22:47:06] Epoch   20/300: loss=0.3546, acc=0.877, val_loss=0.6749
+  [22:49:11] Epoch   25/300: loss=0.3004, acc=0.894, val_loss=0.7354
+  [22:51:16] Epoch   30/300: loss=0.2612, acc=0.908, val_loss=0.7990
+  [22:53:20] Epoch   35/300: loss=0.2329, acc=0.917, val_loss=0.8497
+  [22:55:27] Epoch   40/300: loss=0.2116, acc=0.925, val_loss=0.9024
+
+Early stop at epoch 41 (no val improvement for 30 epochs)
+
+Finished: 2026-06-08 22:55:52 UTC
+Best acc: 0.835 at epoch 11
+
+Sample generations:
+  HELLO                → PATHE! I WAS WONDERING IF YOU WANTED TO HANG OUT S
+  HOW ARE YOU          → I'M DOING WELL, THANK YOU. HOW ABOUT YOU?
+  TELL ME A JOKE       → WHY DID THE T-REX FELL FOR MANY ANIMALS?
+  WHO ARE YOU          → I REALLY GUYS HOOKED OUT OF THE WAY, I WAS SORRY. 
+  THANKS               → IRENA! I TRY TO ALL AS A BEAUTIFUL PERSON.

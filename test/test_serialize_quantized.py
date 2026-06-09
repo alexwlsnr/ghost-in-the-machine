@@ -34,7 +34,7 @@ import torch
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "py"))
 
-from serialize import quantize_4bit, quantize_8bit, serialize
+from serialize import quantize_4bit, quantize_4bit_grouped, quantize_8bit, serialize
 
 
 # ─── Tiny model factory ─────────────────────────────────────────────
@@ -137,15 +137,17 @@ def test_manifest_structure() -> None:
         # Old top-level 'scales' key should NOT be present (scales are per-section now)
         check("scales" not in manifest, f"bits={bits}: no top-level 'scales' key")
 
-        expected_fmt = {32: "fp32", 8: "int8", 4: "int4"}[bits]
+        expected_fmt = {32: "fp32", 8: "int8", 4: "int4g"}[bits]
         check(manifest["weight_format"] == expected_fmt,
               f"bits={bits}: weight_format == '{expected_fmt}'")
 
-        # Check that quantized sections have a 'scale' field and fp32 sections don't
+        # Check that quantized sections have appropriate scale fields
         for name, sec in manifest["sections"].items():
             dtype = sec["dtype"]
-            if dtype in ("int8", "int4"):
+            if dtype == 'int8':
                 check("scale" in sec, f"bits={bits}: section '{name}' has scale")
+            elif dtype == 'int4g':
+                check("scales_offset" in sec, f"bits={bits}: section '{name}' has scales_offset")
             else:
                 check(dtype == "float32", f"bits={bits}: section '{name}' dtype is float32")
                 check("scale" not in sec, f"bits={bits}: fp32 section '{name}' has no scale")
@@ -279,6 +281,72 @@ def test_mixed_precision_layout() -> None:
                       f"bits={bits}: '{name}' must be fp32 (got {sec['dtype']})")
 
 
+def test_4bit_grouped_output_size():
+    """Per-group 4-bit: packed bytes same size as per-tensor; scales array has n_groups entries."""
+    torch.manual_seed(7)
+    t = torch.randn(256)  # 256 values, group_size=32 → 8 groups
+    packed, scales = quantize_4bit_grouped(t, group_size=32)
+    check(len(packed) == 128, f"packed bytes: expected 128, got {len(packed)}")
+    check(len(scales) == 8, f"n_groups: expected 8, got {len(scales)}")
+
+
+def test_4bit_grouped_better_accuracy_than_per_tensor():
+    """Per-group quantization has lower max reconstruction error than per-tensor."""
+    torch.manual_seed(13)
+    # Weight with very different magnitudes in two halves — worst case for per-tensor
+    t = torch.cat([torch.randn(128) * 10.0, torch.randn(128) * 0.01])
+
+    # Per-tensor
+    packed_pt, scale_pt = quantize_4bit(t)
+    raw_pt = np.frombuffer(packed_pt, dtype=np.uint8)
+    recon_pt = np.array([(((b >> 4) & 0xF) - 8) * scale_pt for b in raw_pt] +
+                        [(( b       & 0xF) - 8) * scale_pt for b in raw_pt]).ravel()[:len(t)]
+
+    # Per-group (group_size=32)
+    packed_pg, scales_pg = quantize_4bit_grouped(t, group_size=32)
+    # Reconstruct per-group
+    t_np = t.numpy()
+    recon_pg = np.zeros(len(t_np))
+    for g in range(len(scales_pg)):
+        start, end = g * 32, min((g + 1) * 32, len(t_np))
+        n = end - start
+        byte_start = start // 2
+        byte_end = (end + 1) // 2
+        raw = np.frombuffer(packed_pg[byte_start:byte_end], dtype=np.uint8)
+        vals = []
+        for b in raw:
+            vals.append((b >> 4) & 0xF)
+            vals.append(b & 0xF)
+        for i in range(n):
+            recon_pg[start + i] = (vals[i] - 8) * scales_pg[g]
+
+    err_pt = float(np.max(np.abs(t_np - recon_pt[:len(t_np)])))
+    err_pg = float(np.max(np.abs(t_np - recon_pg)))
+    check(err_pg < err_pt,
+          f"grouped error ({err_pg:.4f}) should be < per-tensor error ({err_pt:.4f})")
+
+
+def test_4bit_grouped_zeros():
+    """Zero tensor → reconstructed values are all zero (nibbles encode 0 as 8, not 0)."""
+    t = torch.zeros(64)
+    packed, scales = quantize_4bit_grouped(t, group_size=32)
+    # Reconstruct and verify all zeros
+    vals = []
+    for b in packed:
+        vals.append(((b >> 4) & 0xF) - 8)
+        vals.append((b & 0xF) - 8)
+    recon = [v * scales[i // 32] for i, v in enumerate(vals[:64])]
+    check(all(abs(r) < 1e-6 for r in recon), "zero tensor: reconstructed values should all be ~0")
+
+
+def test_4bit_grouped_group_size_divides_evenly():
+    """Works when tensor size is not a multiple of group_size."""
+    t = torch.randn(100)  # 100 values, group_size=32 → 4 groups (last group has 4 values)
+    packed, scales = quantize_4bit_grouped(t, group_size=32)
+    check(len(scales) == 4, f"expected 4 groups, got {len(scales)}")
+    check(len(packed) == 50, f"expected 50 bytes, got {len(packed)}")
+
+
 # ─── Entry point ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -289,6 +357,97 @@ if __name__ == "__main__":
     test_4bit_quantization_accuracy()
     test_zeros_stay_zero()
     test_mixed_precision_layout()
+    test_4bit_grouped_output_size()
+    test_4bit_grouped_better_accuracy_than_per_tensor()
+    test_4bit_grouped_zeros()
+    test_4bit_grouped_group_size_divides_evenly()
+
+    print(f"\n{'='*50}")
+    print(f"Results: {PASS} passed, {FAIL} failed")
+    if FAIL > 0:
+        sys.exit(1)
+    else:
+        print("All tests passed!")
+
+
+def test_modern_arch_serializes_without_error():
+    """TinyTransformerModern checkpoint should serialize to valid bin/json."""
+    import tempfile, os
+    sys.path.insert(0, str(ROOT / "py"))
+    from train_transformer import TinyTransformerModern
+    import torch
+
+    model = TinyTransformerModern(vocab_size=16, d_model=8, n_heads=2,
+                                   n_layers=1, d_ff=32, max_len=8,
+                                   use_rope=False)
+    with tempfile.TemporaryDirectory() as td:
+        # Save a minimal checkpoint
+        ckpt = {
+            'model_state': model.state_dict(),
+            'architecture': {
+                'arch': 'modern', 'vocab_size': 16, 'd_model': 8,
+                'n_heads': 2, 'n_layers': 1, 'd_ff': 32, 'max_len': 8,
+            },
+            'best_val_loss': 0.5,
+            'epoch': 10,
+        }
+        ckpt_path = os.path.join(td, 'test_modern.pt')
+        torch.save(ckpt, ckpt_path)
+
+        from serialize import serialize
+        prefix = os.path.join(td, 'model_modern')
+        serialize(ckpt_path, prefix, weight_bits=8)
+        check(os.path.exists(f"{prefix}.bin"), "modern .bin missing")
+        check(os.path.exists(f"{prefix}.json"), "modern .json missing")
+
+
+def test_modern_arch_swiglu_sections_present():
+    """Modern arch should have ff_gate weight sections (SwiGLU)."""
+    import tempfile, os, json
+    sys.path.insert(0, str(ROOT / "py"))
+    from train_transformer import TinyTransformerModern
+    import torch
+
+    model = TinyTransformerModern(vocab_size=16, d_model=8, n_heads=2,
+                                   n_layers=1, d_ff=32, max_len=8,
+                                   use_rope=False, use_swiglu=True)
+    with tempfile.TemporaryDirectory() as td:
+        ckpt = {
+            'model_state': model.state_dict(),
+            'architecture': {
+                'arch': 'modern', 'use_swiglu': True,
+                'vocab_size': 16, 'd_model': 8, 'n_heads': 2,
+                'n_layers': 1, 'd_ff': 32, 'max_len': 8,
+            },
+            'best_val_loss': 0.5, 'epoch': 10,
+        }
+        ckpt_path = os.path.join(td, 'test_swiglu.pt')
+        torch.save(ckpt, ckpt_path)
+        from serialize import serialize
+        prefix = os.path.join(td, 'model_swiglu')
+        serialize(ckpt_path, prefix, weight_bits=32)
+        manifest = json.loads(open(f"{prefix}.json").read())
+        secs = manifest['sections']
+        # SwiGLU should produce enc0_ff_gate and enc0_ff_val sections
+        check('enc0_ff_gate_weight' in secs, "SwiGLU gate section missing")
+        check('enc0_ff_val_weight'  in secs, "SwiGLU val section missing")
+        check('enc0_ff2_weight'     in secs, "SwiGLU out section missing")
+
+
+if __name__ == "__main__":
+    test_manifest_structure()
+    test_compression_ratios()
+    test_fp32_roundtrip()
+    test_8bit_quantization_accuracy()
+    test_4bit_quantization_accuracy()
+    test_zeros_stay_zero()
+    test_mixed_precision_layout()
+    test_4bit_grouped_output_size()
+    test_4bit_grouped_better_accuracy_than_per_tensor()
+    test_4bit_grouped_zeros()
+    test_4bit_grouped_group_size_divides_evenly()
+    test_modern_arch_serializes_without_error()
+    test_modern_arch_swiglu_sections_present()
 
     print(f"\n{'='*50}")
     print(f"Results: {PASS} passed, {FAIL} failed")
