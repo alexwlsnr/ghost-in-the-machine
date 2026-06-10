@@ -556,6 +556,121 @@ class TinyTransformerTernary(nn.Module):
         return self.head(h)
 
 
+# ─── Modern ternary building blocks ─────────────────────────────────
+
+class _TernaryAttentionRoPE(nn.Module):
+    """Ternary Q/K/V/O attention with RoPE and SDPA."""
+
+    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.n_heads = n_heads
+        self.d_head  = d_model // n_heads
+        self.dropout = dropout
+        self.q_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.k_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.v_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.o_proj  = TernaryLinear(d_model, d_model, bias=False)
+
+    def forward(self, x: torch.Tensor,
+                freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
+        B, T, C = x.shape
+        q = self.q_proj(x).view(B, T, self.n_heads, self.d_head)
+        k = self.k_proj(x).view(B, T, self.n_heads, self.d_head)
+        v = self.v_proj(x).view(B, T, self.n_heads, self.d_head)
+        if freqs_cis is not None:
+            q, k = apply_rotary_emb(q, k, freqs_cis[:T])
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        dp = self.dropout if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dp, is_causal=True)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        return self.o_proj(out)
+
+
+class _TernarySwiGLUFFN(nn.Module):
+    """SwiGLU FFN with all-ternary projections."""
+
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = TernaryLinear(d_model, d_ff, bias=False)  # gate
+        self.w2 = TernaryLinear(d_model, d_ff, bias=False)  # value
+        self.w3 = TernaryLinear(d_ff, d_model, bias=False)  # output
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
+
+
+class _TernaryModernBlock(nn.Module):
+    """Pre-norm block: RMSNorm + ternary RoPE attention + ternary SwiGLU FFN."""
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1):
+        super().__init__()
+        self.norm1 = RMSNorm(d_model)
+        self.attn  = _TernaryAttentionRoPE(d_model, n_heads, dropout=dropout)
+        self.norm2 = RMSNorm(d_model)
+        self.ff    = _TernarySwiGLUFFN(d_model, d_ff)
+
+    def forward(self, x: torch.Tensor,
+                freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x), freqs_cis)
+        x = x + self.ff(self.norm2(x))
+        return x
+
+
+class TinyTransformerTernaryModern(nn.Module):
+    """Ternary transformer with modern components: RMSNorm + SwiGLU + RoPE.
+
+    Combines the ternary weight quantisation of TinyTransformerTernary with
+    the architectural improvements of TinyTransformerModern. Intended as the
+    architecture for Spectre and future large ternary models.
+    """
+
+    arch = 'ternary_modern'
+
+    def __init__(self, vocab_size: int, d_model: int, n_heads: int,
+                 n_layers: int, d_ff: int, max_len: int, dropout: float = 0.1):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model    = d_model
+        self.n_heads    = n_heads
+        self.n_layers   = n_layers
+        self.d_ff       = d_ff
+        self.max_len    = max_len
+
+        self.token_embed = nn.Embedding(vocab_size, d_model)
+        self.register_buffer(
+            'freqs_cis',
+            precompute_freqs_cis(d_model // n_heads, max_len),
+            persistent=False,
+        )
+        self.blocks = nn.ModuleList([
+            _TernaryModernBlock(d_model, n_heads, d_ff, dropout=dropout)
+            for _ in range(n_layers)
+        ])
+        self.ln_final = RMSNorm(d_model)
+        self.head = nn.Linear(d_model, vocab_size, bias=False)
+        self.head.weight = self.token_embed.weight  # weight tying
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.token_embed.weight, std=0.02)
+
+    def compute_quantization_loss(self, weight_bits: int = 4) -> torch.Tensor:
+        return torch.tensor(0.0, device=next(self.parameters()).device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        h = self.token_embed(x) * math.sqrt(self.d_model)
+        freqs = self.freqs_cis[:T]
+        for block in self.blocks:
+            h = block(h, freqs)
+        h = self.ln_final(h)
+        return self.head(h)
+
+
 # ─── Sequence builders ──────────────────────────────────────────────
 
 def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
@@ -899,7 +1014,8 @@ def train_transformer(
                 'model_state': model.state_dict(),
                 'architecture': {
                     'type': 'tiny_transformer',
-                    'arch': ('ternary' if isinstance(model, TinyTransformerTernary)
+                    'arch': ('ternary_modern' if isinstance(model, TinyTransformerTernaryModern)
+                             else 'ternary' if isinstance(model, TinyTransformerTernary)
                              else 'modern' if isinstance(model, TinyTransformerModern)
                              else 'classic'),
                     # Save individual modern flags so loaders don't need to infer from state dict
@@ -1044,7 +1160,7 @@ if __name__ == '__main__':
                         help='disable uppercase normalization (required for Wraith/technical models)')
     parser.add_argument('--truncate', action='store_true',
                         help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
-    parser.add_argument('--arch', default='classic', choices=['classic', 'modern', 'ternary'],
+    parser.add_argument('--arch', default='classic', choices=['classic', 'modern', 'ternary', 'ternary_modern'],
                         help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
     parser.add_argument('--tokenizer', type=str, default=None,
                         help='path to BPE tokenizer JSON (from train_bpe.py); omit for byte-level')
@@ -1100,7 +1216,9 @@ if __name__ == '__main__':
         _kw = dict(vocab_size=arch['vocab_size'], d_model=arch['d_model'],
                    n_heads=arch['n_heads'], n_layers=arch['n_layers'],
                    d_ff=arch['d_ff'], max_len=arch['max_len'])
-        if arch.get('arch') == 'ternary':
+        if arch.get('arch') == 'ternary_modern':
+            model = TinyTransformerTernaryModern(**_kw)
+        elif arch.get('arch') == 'ternary':
             model = TinyTransformerTernary(**_kw)
         elif arch.get('arch') == 'modern':
             state = ckpt['model_state']
@@ -1131,7 +1249,16 @@ if __name__ == '__main__':
         remaining = max(1, args.epochs - start_epoch)
     else:
         vocab_sz = tok.vocab_size if tok else VOCAB_SIZE
-        if args.arch == 'ternary':
+        if args.arch == 'ternary_modern':
+            model = TinyTransformerTernaryModern(
+                vocab_size=vocab_sz,
+                d_model=args.d_model,
+                n_heads=args.n_heads,
+                n_layers=args.n_layers,
+                d_ff=args.d_ff,
+                max_len=args.max_len,
+            )
+        elif args.arch == 'ternary':
             model = TinyTransformerTernary(
                 vocab_size=vocab_sz,
                 d_model=args.d_model,
