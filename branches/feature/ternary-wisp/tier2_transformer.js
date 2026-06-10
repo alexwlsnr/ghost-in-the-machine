@@ -555,7 +555,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
             }
             await new Promise((r) => setTimeout(r, 0));
             const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-            if (next === _EOS || next === _PAD) {
+            if (next === _EOS || next === _PAD || next === _SEP) {
                 yield { char: '', token: next, done: true };
                 return;
             }
@@ -578,7 +578,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
             }
             await new Promise((r) => setTimeout(r, 0));
             const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-            if (next === _EOS || next === _PAD) {
+            if (next === _EOS || next === _PAD || next === _SEP) {
                 yield { char: '', token: next, done: true };
                 return;
             }
@@ -598,7 +598,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
         await new Promise((r) => setTimeout(r, 0));
         const logits = forward(api, sec, arch, tokens, base);
         const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-        if (next === _EOS || next === _PAD) {
+        if (next === _EOS || next === _PAD || next === _SEP) {
             yield { char: '', token: next, done: true };
             return;
         }
