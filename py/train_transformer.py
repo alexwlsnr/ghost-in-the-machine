@@ -1091,17 +1091,25 @@ def generate(
     temperature: float = 0.8,
     device: str = 'cpu',
     preserve_case: bool = False,
+    tok=None,
 ) -> str:
     model.eval()
     model = model.to(device)
 
-    # Cap the prompt at the context window (mirrors the TS orchestrator). The old
-    # `[:max_len - max_new]` silently dropped prompt bytes (e.g. "HELLO" → "HELL").
     prompt_norm = prompt if preserve_case else prompt.upper()
-    # Inject SEP after the prompt — this puts the model in "response zone"
-    # so it generates R directly rather than potentially emitting SEP first.
-    tokens = encode(prompt_norm)[:model.max_len - 2] + [SEP_TOKEN]
+
+    if tok is not None:
+        _enc  = tok.encode
+        _dec  = tok.decode
+        _SEP, _EOS, _PAD = tok.SEP, tok.EOS, tok.PAD
+    else:
+        _enc  = encode
+        _dec  = decode
+        _SEP, _EOS, _PAD = SEP_TOKEN, EOS_TOKEN, PAD_TOKEN
+
+    tokens = _enc(prompt_norm)[:model.max_len - 2] + [_SEP]
     prompt_len = len(tokens)
+    generated = []
 
     for _ in range(max_new):
         x = torch.tensor([tokens], dtype=torch.long, device=device)
@@ -1110,19 +1118,14 @@ def generate(
         probs = F.softmax(next_logits, dim=-1)
         next_token = torch.multinomial(probs, 1).item()
 
-        if next_token == EOS_TOKEN or next_token == PAD_TOKEN:
+        if next_token in (_EOS, _PAD, _SEP):
             break
-        # Skip any SEP token the model emits (shouldn't happen with injected SEP,
-        # but guard against it so it never appears in output.)
-        if next_token != SEP_TOKEN:
-            tokens.append(next_token)
+        generated.append(next_token)
+        tokens.append(next_token)
         if len(tokens) >= model.max_len:
             break
 
-    # Return only the generated portion (after the prompt tokens we kept).
-    # decode() already filters SEP (byte 1) since it only outputs b < 256 that
-    # are printable; SEP_TOKEN=1 is a control char that bytes().decode replaces.
-    return decode(tokens[prompt_len:])
+    return _dec(generated)
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────
@@ -1314,8 +1317,9 @@ if __name__ == '__main__':
     )
     model = result['model']
 
-    # Test generation (BPE models use tok.decode)
+    # Test generation
     print("\nSample generations:")
     for prompt in ['HELLO', 'HOW ARE YOU', 'TELL ME A JOKE', 'WHO ARE YOU', 'THANKS']:
-        out = generate(model, prompt, 50, temperature=0.8, device=device)
+        out = generate(model, prompt, max_new=60, temperature=0.8,
+                       preserve_case=args.preserve_case, device=device, tok=tok)
         print(f"  {prompt:20s} → {out}")
