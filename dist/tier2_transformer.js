@@ -526,7 +526,7 @@ export function sampleFromLogits(logits, temp, topK, topP, rand, repPenalty = 1.
     }
     return weighted[weighted.length - 1][0];
 }
-export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0, history, gpuEngine) {
+export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0, history, gpuEngine, punctStop = true) {
     const { api, manifest: arch, sec, base } = model;
     const bpeT = model.bpe;
     // Token-type helpers — byte-level defaults when no BPE tokenizer present
@@ -544,6 +544,24 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
     const REP_WINDOW = 32;
     const generated = [];
+    // Heuristic: stop when a no-leading-space token follows end-punctuation.
+    // Catches overrun like "OATMEAL!HA!" where the model drifts past EOS.
+    // Only active for BPE models (byte-level models have no leading-space concept).
+    const PUNCT_END = /[.!?]$/;
+    let lastDecoded = '';
+    function punctStopCheck(nextId) {
+        if (!punctStop || !bpeT)
+            return false;
+        const piece = _dec(nextId);
+        const stop = PUNCT_END.test(lastDecoded) && piece.length > 0 && piece[0] !== ' ';
+        return stop;
+    }
+    function emitAndTrack(nextId) {
+        const piece = _dec(nextId);
+        if (piece)
+            lastDecoded = piece;
+        return piece;
+    }
     // -- GPU path -------------------------------------------------------
     if (gpuEngine !== undefined) {
         gpuEngine.reset();
@@ -555,12 +573,16 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
             }
             await new Promise((r) => setTimeout(r, 0));
             const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-            if (next === _EOS || next === _PAD) {
+            if (next === _EOS || next === _PAD || next === _SEP) {
                 yield { char: '', token: next, done: true };
                 return;
             }
+            if (punctStopCheck(next)) {
+                yield { char: '', token: _EOS, done: true };
+                return;
+            }
             generated.push(next);
-            yield { char: _dec(next), token: next, done: false };
+            yield { char: emitAndTrack(next), token: next, done: false };
             logits = await gpuEngine.step(next);
         }
         yield { char: '', token: _PAD, done: true };
@@ -578,12 +600,16 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
             }
             await new Promise((r) => setTimeout(r, 0));
             const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-            if (next === _EOS || next === _PAD) {
+            if (next === _EOS || next === _PAD || next === _SEP) {
                 yield { char: '', token: next, done: true };
                 return;
             }
+            if (punctStopCheck(next)) {
+                yield { char: '', token: _EOS, done: true };
+                return;
+            }
             generated.push(next);
-            yield { char: _dec(next), token: next, done: false };
+            yield { char: emitAndTrack(next), token: next, done: false };
             logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
         }
         yield { char: '', token: _PAD, done: true };
@@ -598,14 +624,17 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
         await new Promise((r) => setTimeout(r, 0));
         const logits = forward(api, sec, arch, tokens, base);
         const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-        if (next === _EOS || next === _PAD) {
+        if (next === _EOS || next === _PAD || next === _SEP) {
             yield { char: '', token: next, done: true };
+            return;
+        }
+        if (punctStopCheck(next)) {
+            yield { char: '', token: _EOS, done: true };
             return;
         }
         generated.push(next);
         tokens.push(next);
-        yield { char: _dec(next), token: next, done: false };
+        yield { char: emitAndTrack(next), token: next, done: false };
     }
     yield { char: '', token: _PAD, done: true };
 }
-//# sourceMappingURL=tier2_transformer.js.map

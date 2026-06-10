@@ -635,6 +635,7 @@ export async function* generate(
   cache?: KVCache, topK = 0, topP = 1.0,
   history?: Turn[],
   gpuEngine?: GPUEngine,
+  punctStop = true,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
   const bpeT = (model as any).bpe as BPETokenizer | undefined;
@@ -657,6 +658,23 @@ export async function* generate(
   const REP_WINDOW = 32;
   const generated: number[] = [];
 
+  // Heuristic: stop when a no-leading-space token follows end-punctuation.
+  // Catches overrun like "OATMEAL!HA!" where the model drifts past EOS.
+  // Only active for BPE models (byte-level models have no leading-space concept).
+  const PUNCT_END = /[.!?]$/;
+  let lastDecoded = '';
+  function punctStopCheck(nextId: number): boolean {
+    if (!punctStop || !bpeT) return false;
+    const piece = _dec(nextId);
+    const stop = PUNCT_END.test(lastDecoded) && piece.length > 0 && piece[0] !== ' ';
+    return stop;
+  }
+  function emitAndTrack(nextId: number): string {
+    const piece = _dec(nextId);
+    if (piece) lastDecoded = piece;
+    return piece;
+  }
+
   // -- GPU path -------------------------------------------------------
   if (gpuEngine !== undefined) {
     gpuEngine.reset();
@@ -667,8 +685,9 @@ export async function* generate(
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
       if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
+      if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
       generated.push(next);
-      yield { char: _dec(next), token: next, done: false };
+      yield { char: emitAndTrack(next), token: next, done: false };
       logits = await gpuEngine.step(next);
     }
     yield { char: '', token: _PAD, done: true };
@@ -686,8 +705,9 @@ export async function* generate(
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
       if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
+      if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
       generated.push(next);
-      yield { char: _dec(next), token: next, done: false };
+      yield { char: emitAndTrack(next), token: next, done: false };
       logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
     }
     yield { char: '', token: _PAD, done: true };
@@ -702,9 +722,10 @@ export async function* generate(
     const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                    repPenalty, generated.slice(-REP_WINDOW));
     if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
+    if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
     generated.push(next);
     tokens.push(next);
-    yield { char: _dec(next), token: next, done: false };
+    yield { char: emitAndTrack(next), token: next, done: false };
   }
   yield { char: '', token: _PAD, done: true };
 }

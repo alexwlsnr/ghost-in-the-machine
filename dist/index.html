@@ -447,6 +447,7 @@
     <span id="model-info">---</span>
     <button id="simd-badge" style="display:none;font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #00ffff44;color:#00ffff;" title="Toggle SIMD kernel">⚡ SIMD</button>
     <button id="mem-badge" style="font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #33ff3322;color:#33ff3344;" title="Enable conversation memory for all models (experimental on ctx=128)">○ MEM</button>
+    <button id="punct-badge" style="font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:#33ff3311;border:1px solid #33ff3366;color:#33ff33;" title="Punctuation stop heuristic ON — stops generation when a token without a leading space follows end punctuation. Click to disable for raw output.">● PSTOP</button>
     <span id="perf-info">---</span>
   </div>
 
@@ -879,7 +880,7 @@ input.addEventListener('keydown', async (e) => {
     // Larger models on longer contexts can ramble — cap response length per model
     const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 120 : 160);
     const gpu = gpuEngines[activeId] || undefined;
-    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : kvCaches[activeId], 0, 1.0, history, gpu)) {
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : kvCaches[activeId], 0, 1.0, history, gpu, punctStopOn)) {
       if (step.done) {
         hitLimit = step.token !== 257; // 257=EOS = clean stop; PAD/ctx = truncated
         break;
@@ -957,6 +958,25 @@ legacyBtn.addEventListener('click', (e) => {
 });
 document.addEventListener('click', (e) => {
   if (!legacyMenu.contains(e.target) && e.target !== legacyBtn) closeLegacyMenu();
+});
+
+// ── Punctuation stop heuristic toggle ────────────────────────────────────
+let punctStopOn = true;
+const punctBadge = document.getElementById('punct-badge');
+function updatePunctBadge() {
+  punctBadge.textContent       = punctStopOn ? '● PSTOP' : '○ PSTOP';
+  punctBadge.style.color       = punctStopOn ? '#33ff33'   : '#33ff3344';
+  punctBadge.style.borderColor = punctStopOn ? '#33ff3388' : '#33ff3322';
+  punctBadge.style.background  = punctStopOn ? '#33ff3311' : 'transparent';
+  punctBadge.title             = punctStopOn
+    ? 'Punct-stop ON — stops on no-space token after punctuation. Click to disable for raw output.'
+    : 'Punct-stop OFF — raw model output. Click to enable.';
+}
+punctBadge.addEventListener('click', () => {
+  punctStopOn = !punctStopOn;
+  updatePunctBadge();
+  appendLine(`PUNCT-STOP: ${punctStopOn ? 'ON' : 'OFF'}`, 'boot');
+  input.focus();
 });
 
 // ── Memory mode toggle ────────────────────────────────────────────────────
