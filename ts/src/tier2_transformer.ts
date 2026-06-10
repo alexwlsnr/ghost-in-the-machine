@@ -3,6 +3,8 @@
  */
 
 import type { GPUEngine } from './gpu_engine.js';
+import { BPETokenizer } from './bpe_tokenizer.js';
+import type { BPEData } from './bpe_tokenizer.js';
 
 export interface SectionDef { offset: number; size: number; shape: number[]; dtype: string; scale?: number; scales_offset?: number; scales_size?: number; group_size?: number; }
 export interface Arch { vocab_size: number; d_model: number; n_heads: number; n_layers: number; d_ff: number; max_len: number;
@@ -78,7 +80,9 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
   const api = wasm.instance.exports as unknown as WasmApi;
   const manifest = JSON.parse(new TextDecoder().decode(jsonBuf)) as {
     architecture: Arch; sections: Record<string, SectionDef>;
+    tokenizer?: BPEData;
   };
+  const bpe = manifest.tokenizer ? new BPETokenizer(manifest.tokenizer) : undefined;
   const sec = manifest.sections;
   const mem = api.memory;
 
@@ -139,7 +143,7 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
     }
   }
 
-  return { api, manifest: manifest.architecture, sec, base, sparseBuffers };
+  return { api, manifest: manifest.architecture, sec, base, sparseBuffers, bpe };
 }
 
 export function encode(text: string): number[] {
@@ -558,15 +562,18 @@ export function buildContextTokens(
   query: string,
   maxLen: number,
   maxHistory: number = 1,
+  bpe?: BPETokenizer,
 ): number[] {
-  const queryTokens = [...encode(query.toUpperCase()), SEP];
+  const _enc = bpe ? (s: string) => bpe.encode(s) : encode;
+  const _SEP  = bpe ? bpe.SEP : SEP;
+  const queryTokens = [..._enc(query.toUpperCase()), _SEP];
   let tokens = queryTokens;
 
   const recent = history.slice(-maxHistory);
   for (const turn of [...recent].reverse()) {
     const chunk = [
-      ...encode(turn.q.toUpperCase()), SEP,
-      ...encode(turn.r.toUpperCase()), SEP,
+      ..._enc(turn.q.toUpperCase()), _SEP,
+      ..._enc(turn.r.toUpperCase()), _SEP,
     ];
     if (tokens.length + chunk.length >= maxLen) break;
     tokens = [...chunk, ...tokens];
@@ -630,13 +637,22 @@ export async function* generate(
   gpuEngine?: GPUEngine,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
-  const win = arch.max_len - 1;
-  // Build token sequence — with history if provided, bare query otherwise.
-  const tokens = (history && history.length > 0)
-    ? buildContextTokens(history, prompt, win)
-    : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
+  const bpeT = (model as any).bpe as BPETokenizer | undefined;
 
-  // Repetition penalty: 1.35 for larger models (ctx≥512), 1.15 subtle for small ones
+  // Token-type helpers — byte-level defaults when no BPE tokenizer present
+  const _SEP = bpeT ? bpeT.SEP : SEP;
+  const _EOS = bpeT ? bpeT.EOS : EOS;
+  const _PAD = bpeT ? bpeT.PAD : PAD;
+  const _enc = bpeT ? (s: string) => bpeT.encode(s) : encode;
+  const _dec = bpeT
+    ? (id: number) => bpeT.decodeToken(id)
+    : (id: number) => (id < 256 && id !== SEP) ? String.fromCharCode(id) : '';
+
+  const win = arch.max_len - 1;
+  const tokens = (history && history.length > 0)
+    ? buildContextTokens(history, prompt, win, 1, bpeT)
+    : [..._enc(prompt.toUpperCase()).slice(0, win - 1), _SEP];
+
   const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
   const REP_WINDOW = 32;
   const generated: number[] = [];
@@ -646,16 +662,16 @@ export async function* generate(
     gpuEngine.reset();
     let logits = await gpuEngine.prefill(tokens);
     for (let s = 0; s < maxNew; s++) {
-      if (gpuEngine.seqLen >= win) { yield { char: '', token: PAD, done: true }; return; }
+      if (gpuEngine.seqLen >= win) { yield { char: '', token: _PAD, done: true }; return; }
       await new Promise((r) => setTimeout(r, 0));
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
-      if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+      if (next === _EOS || next === _PAD) { yield { char: '', token: next, done: true }; return; }
       generated.push(next);
-      yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
+      yield { char: _dec(next), token: next, done: false };
       logits = await gpuEngine.step(next);
     }
-    yield { char: '', token: PAD, done: true };
+    yield { char: '', token: _PAD, done: true };
     return;
   }
 
@@ -665,30 +681,30 @@ export async function* generate(
     const sp = (model as any).sparseBuffers as SparseMap | undefined;
     let logits = prefill(api, sec, arch, tokens, base, cache, sp);
     for (let s = 0; s < maxNew; s++) {
-      if (cache.length >= win) { yield { char: '', token: PAD, done: true }; return; }
+      if (cache.length >= win) { yield { char: '', token: _PAD, done: true }; return; }
       await new Promise((r) => setTimeout(r, 0));
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
-      if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+      if (next === _EOS || next === _PAD) { yield { char: '', token: next, done: true }; return; }
       generated.push(next);
-      yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
+      yield { char: _dec(next), token: next, done: false };
       logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
     }
-    yield { char: '', token: PAD, done: true };
+    yield { char: '', token: _PAD, done: true };
     return;
   }
 
   // -- Full-recompute path (no cache — backward compatible) -----------
   for (let s = 0; s < maxNew; s++) {
-    if (tokens.length >= win) { yield { char: '', token: PAD, done: true }; return; }
+    if (tokens.length >= win) { yield { char: '', token: _PAD, done: true }; return; }
     await new Promise((r) => setTimeout(r, 0));
     const logits = forward(api, sec, arch, tokens, base);
     const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                    repPenalty, generated.slice(-REP_WINDOW));
-    if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+    if (next === _EOS || next === _PAD) { yield { char: '', token: next, done: true }; return; }
     generated.push(next);
     tokens.push(next);
-    yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
+    yield { char: _dec(next), token: next, done: false };
   }
-  yield { char: '', token: PAD, done: true };
+  yield { char: '', token: _PAD, done: true };
 }

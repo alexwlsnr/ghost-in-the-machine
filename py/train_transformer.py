@@ -559,7 +559,8 @@ class TinyTransformerTernary(nn.Module):
 # ─── Sequence builders ──────────────────────────────────────────────
 
 def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
-                  truncate: bool = False, mask_query: bool = False) -> Tuple[List[int], List[int]]:
+                  truncate: bool = False, mask_query: bool = False,
+                  tok=None) -> Tuple[List[int], List[int]]:
     """Create input/target pair for autoregressive training.
 
     Layout: [Q bytes] [SEP] [R bytes] [EOS]
@@ -576,28 +577,28 @@ def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
       preventing the doubled-response issue. Use for Wisp (ctx=64) where
       strict filtering would discard 97% of diverse training data.
     """
-    q_bytes = encode(query)
-    r_bytes = encode(response)
+    if tok is not None:
+        q_bytes = tok.encode(query)
+        r_bytes = tok.encode(response)
+        _PAD, _EOS, _SEP = tok.PAD, tok.EOS, tok.SEP
+    else:
+        q_bytes = encode(query)
+        r_bytes = encode(response)
+        _PAD, _EOS, _SEP = PAD_TOKEN, EOS_TOKEN, SEP_TOKEN
 
-    full = q_bytes + [SEP_TOKEN] + r_bytes
+    full = q_bytes + [_SEP] + r_bytes
     if len(full) + 1 > max_len:
         if not truncate:
-            return [], []          # signal caller to drop
-        full = full[:max_len - 1]  # truncate R, EOS will follow
+            return [], []
+        full = full[:max_len - 1]
 
-    # Input: Q + SEP + R + EOS
-    inp = full + [EOS_TOKEN]
-
-    # Target: predict next token (shifted left), EOS marks end, PAD fills remainder
-    tgt = full[1:] + [EOS_TOKEN, PAD_TOKEN]
+    inp = full + [_EOS]
+    tgt = full[1:] + [_EOS, _PAD]
     tgt = tgt[:len(inp)]
 
-    # Response loss masking: replace query positions with PAD so loss is only
-    # computed on response tokens. The position at index len(q_bytes) predicts
-    # the first response byte (given Q+SEP context) — keep that.
     if mask_query:
-        for i in range(len(q_bytes)):
-            tgt[i] = PAD_TOKEN
+        for i in range(min(len(q_bytes), len(tgt))):
+            tgt[i] = _PAD
 
     return inp, tgt
 
@@ -621,7 +622,7 @@ def split_pairs(pairs, val_frac: float, seed: int = 0):
 
 
 def _build_sequences(pairs, max_len: int, preserve_case: bool = False,
-                     truncate: bool = False, mask_query: bool = False):
+                     truncate: bool = False, mask_query: bool = False, tok=None):
     """Tokenize pairs into (inputs, targets), dropping empty / too-short ones.
 
     Accepts either single-turn (q, r) tuples or multi-turn [(q1,r1),(q2,r2),...]
@@ -639,9 +640,9 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False,
             turns = [(q.strip(), r.strip()) for q, r in turns]
         if len(turns) == 1:
             inp, tgt = make_sequence(turns[0][0], turns[0][1], max_len,
-                                     truncate=truncate, mask_query=mask_query)
+                                     truncate=truncate, mask_query=mask_query, tok=tok)
         else:
-            inp, tgt = make_sequence_multiturn(turns, max_len, mask_query=mask_query)
+            inp, tgt = make_sequence_multiturn(turns, max_len, mask_query=mask_query, tok=tok)
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -669,6 +670,7 @@ def make_sequence_multiturn(
     turns: List[Tuple[str, str]],
     max_len: int = DEFAULT_MAX_LEN,
     mask_query: bool = False,
+    tok=None,
 ) -> Tuple[List[int], List[int]]:
     """Build an autoregressive sequence from a list of (query, response) pairs.
 
@@ -680,31 +682,33 @@ def make_sequence_multiturn(
     mask_query: if True, query byte positions in the target are set to PAD_TOKEN
       so the loss is only computed on response tokens.
     """
+    _PAD = tok.PAD if tok else PAD_TOKEN
+    _EOS = tok.EOS if tok else EOS_TOKEN
+    _SEP = tok.SEP if tok else SEP_TOKEN
+    _enc = tok.encode if tok else encode
+
     tokens: List[int] = []
-    # Track which positions are query bytes (for masking)
     is_query_pos: List[bool] = []
     for q, r in turns:
-        q_bytes = encode(q)
-        r_bytes = encode(r)
-        tokens += q_bytes + [SEP_TOKEN] + r_bytes + [SEP_TOKEN]
+        q_bytes = _enc(q)
+        r_bytes = _enc(r)
+        tokens += q_bytes + [_SEP] + r_bytes + [_SEP]
         is_query_pos += [True] * len(q_bytes) + [False] * (1 + len(r_bytes) + 1)
 
-    # Replace trailing SEP with EOS
     if not tokens:
         return [], []
-    tokens[-1] = EOS_TOKEN
+    tokens[-1] = _EOS
 
     if len(tokens) > max_len:
         return [], []
 
     inp = tokens
-    tgt = tokens[1:] + [PAD_TOKEN]
+    tgt = tokens[1:] + [_PAD]
 
     if mask_query:
-        # tgt[i] predicts inp[i+1]; mask position i when inp[i] is a query byte
         for i in range(len(tgt)):
             if i < len(is_query_pos) and is_query_pos[i]:
-                tgt[i] = PAD_TOKEN
+                tgt[i] = _PAD
 
     return inp, tgt
 
@@ -734,6 +738,8 @@ def train_transformer(
     preserve_case: bool = False,
     truncate: bool = False,
     mask_query: bool = False,
+    tok=None,
+    resume_best_val_loss=None,
 ):
     """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
     # Lazy-import supervision emitter — no hard dep when not used.
@@ -760,9 +766,11 @@ def train_transformer(
     model = model.to(device)
     model.train()
 
+    pad_id = tok.PAD if tok else PAD_TOKEN
+
     train_pairs, val_pairs = split_pairs(pairs, val_frac)
-    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate, mask_query)
-    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate, mask_query)
+    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate, mask_query, tok)
+    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate, mask_query, tok)
 
     print(f"Sequences — train: {len(all_inputs)}, val: {len(val_inputs)}")
     total_params = sum(p.numel() for p in model.parameters())
@@ -781,7 +789,7 @@ def train_transformer(
 
     train_start = time.time()
     best_acc = 0.0
-    best_val_loss = float('inf')
+    best_val_loss = resume_best_val_loss if resume_best_val_loss is not None else float('inf')
     best_epoch = 0
     no_improve = 0
     step = 0
@@ -805,8 +813,8 @@ def train_transformer(
             padded_y = []
             for inp, tgt in zip(batch_inputs, batch_targets):
                 pad_n = max_blen - len(inp)
-                padded_x.append(inp + [PAD_TOKEN] * pad_n)
-                padded_y.append(tgt + [PAD_TOKEN] * pad_n)
+                padded_x.append(inp + [pad_id] * pad_n)
+                padded_y.append(tgt + [pad_id] * pad_n)
 
             x = torch.tensor(padded_x, dtype=torch.long, device=device)
             y = torch.tensor(padded_y, dtype=torch.long, device=device)
@@ -818,7 +826,7 @@ def train_transformer(
                 loss = F.cross_entropy(
                     logits.reshape(-1, model.vocab_size),
                     y.reshape(-1),
-                    ignore_index=PAD_TOKEN,
+                    ignore_index=pad_id,
                 )
 
             # Quantization-aware penalty is expensive (per-tensor quantile), so
@@ -834,7 +842,7 @@ def train_transformer(
 
             total_loss += loss.item()
             pred_tokens = logits.argmax(dim=-1)
-            mask = y != PAD_TOKEN
+            mask = y != pad_id
             total_correct += (pred_tokens[mask] == y[mask]).sum().item()
             total_tokens += mask.sum().item()
             n_batches += 1
@@ -854,9 +862,9 @@ def train_transformer(
             with torch.no_grad():
                 for batch_idxs in make_batches(list(range(len(val_inputs))), batch_size):
                     max_blen = max(len(val_inputs[i]) for i in batch_idxs)
-                    px = [val_inputs[i] + [PAD_TOKEN] * (max_blen - len(val_inputs[i]))
+                    px = [val_inputs[i] + [pad_id] * (max_blen - len(val_inputs[i]))
                           for i in batch_idxs]
-                    py = [val_targets[i] + [PAD_TOKEN] * (max_blen - len(val_targets[i]))
+                    py = [val_targets[i] + [pad_id] * (max_blen - len(val_targets[i]))
                           for i in batch_idxs]
                     x = torch.tensor(px, dtype=torch.long, device=device)
                     y = torch.tensor(py, dtype=torch.long, device=device)
@@ -864,7 +872,7 @@ def train_transformer(
                     val_total += F.cross_entropy(
                         logits.reshape(-1, model.vocab_size),
                         y.reshape(-1),
-                        ignore_index=PAD_TOKEN,
+                        ignore_index=pad_id,
                     ).item()
                     val_batches += 1
             val_loss = val_total / max(val_batches, 1)
@@ -907,6 +915,8 @@ def train_transformer(
                     'd_ff': model.d_ff,
                     'max_len': model.max_len,
                     'weight_bits': 4,
+                    **(({'tokenizer_file': checkpoint_file.replace('.pt', '_tokenizer.json'),
+                         'tokenizer_type': 'bpe'}) if tok else {}),
                 },
                 'best_acc': best_acc,
                 'best_val_loss': best_val_loss if val_inputs else None,
@@ -1036,6 +1046,8 @@ if __name__ == '__main__':
                         help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
     parser.add_argument('--arch', default='classic', choices=['classic', 'modern', 'ternary'],
                         help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
+    parser.add_argument('--tokenizer', type=str, default=None,
+                        help='path to BPE tokenizer JSON (from train_bpe.py); omit for byte-level')
     parser.add_argument('--mask-query-loss', action='store_true',
                         help='only compute loss on response tokens (masks query positions)')
     # Fine-grained modern arch overrides (only apply when --arch modern)
@@ -1049,6 +1061,19 @@ if __name__ == '__main__':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
         device = args.device
+
+    # BPE tokenizer (optional — byte-level used when absent)
+    tok = None
+    if args.tokenizer:
+        import importlib.util, sys as _sys
+        _spec = importlib.util.spec_from_file_location(
+            'bpe_tokenizer',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bpe_tokenizer.py'),
+        )
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        tok = _mod.BPETokenizer(args.tokenizer)
+        print(f"BPE tokenizer loaded: {tok.vocab_size} tokens from {args.tokenizer}")
 
     # Load training data — supports both single-turn (Q|R) and multi-turn (Q1|R1|Q2|R2|...) lines.
     pairs = []
@@ -1070,24 +1095,34 @@ if __name__ == '__main__':
     # Create or resume model
     if args.resume and __import__('os').path.exists(args.resume):
         print(f"Resuming from {args.resume}")
-        ckpt = torch.load(args.resume, map_location=device, weights_only=True)
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
         arch = ckpt['architecture']
-        model = TinyTransformer(
-            vocab_size=arch['vocab_size'],
-            d_model=arch['d_model'],
-            n_heads=arch['n_heads'],
-            n_layers=arch['n_layers'],
-            d_ff=arch['d_ff'],
-            max_len=arch['max_len'],
-        )
+        _kw = dict(vocab_size=arch['vocab_size'], d_model=arch['d_model'],
+                   n_heads=arch['n_heads'], n_layers=arch['n_layers'],
+                   d_ff=arch['d_ff'], max_len=arch['max_len'])
+        if arch.get('arch') == 'ternary':
+            model = TinyTransformerTernary(**_kw)
+        elif arch.get('arch') == 'modern':
+            state = ckpt['model_state']
+            model = TinyTransformerModern(**_kw,
+                use_rope='pos_embed.weight' not in state,
+                use_swiglu=any('ff.w1' in k for k in state),
+                use_rmsnorm=not any('norm1.bias' in k for k in state),
+                tie_weights='head.weight' not in state)
+        else:
+            model = TinyTransformer(**_kw)
         model.load_state_dict(ckpt['model_state'])
         start_epoch = ckpt.get('epoch', 0)
         remaining = max(1, args.epochs - start_epoch)
+        # Preserve best_val_loss from checkpoint so resumed runs never overwrite
+        # a better checkpoint just because their first epoch beats float('inf')
+        _resume_best_val_loss = ckpt.get('best_val_loss', None)
         print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
     else:
+        vocab_sz = tok.vocab_size if tok else VOCAB_SIZE
         if args.arch == 'ternary':
             model = TinyTransformerTernary(
-                vocab_size=VOCAB_SIZE,
+                vocab_size=vocab_sz,
                 d_model=args.d_model,
                 n_heads=args.n_heads,
                 n_layers=args.n_layers,
@@ -1096,7 +1131,7 @@ if __name__ == '__main__':
             )
         elif args.arch == 'modern':
             model = TinyTransformerModern(
-                vocab_size=VOCAB_SIZE,
+                vocab_size=vocab_sz,
                 d_model=args.d_model,
                 n_heads=args.n_heads,
                 n_layers=args.n_layers,
@@ -1109,7 +1144,7 @@ if __name__ == '__main__':
             )
         else:
             model = TinyTransformer(
-                vocab_size=VOCAB_SIZE,
+                vocab_size=vocab_sz,
                 d_model=args.d_model,
                 n_heads=args.n_heads,
                 n_layers=args.n_layers,
@@ -1117,6 +1152,14 @@ if __name__ == '__main__':
                 max_len=args.max_len,
             )
         remaining = args.epochs
+
+    # Copy tokenizer JSON next to checkpoint so serialize.py can find it
+    if tok and args.tokenizer:
+        import shutil
+        tok_dest = args.checkpoint.replace('.pt', '_tokenizer.json')
+        if os.path.abspath(args.tokenizer) != os.path.abspath(tok_dest):
+            shutil.copy(args.tokenizer, tok_dest)
+            print(f"Tokenizer copied to {tok_dest}")
 
     result = train_transformer(
         model, pairs, epochs=remaining, lr=args.lr,
@@ -1128,10 +1171,12 @@ if __name__ == '__main__':
         preserve_case=args.preserve_case,
         truncate=args.truncate,
         mask_query=args.mask_query_loss,
+        tok=tok,
+        resume_best_val_loss=locals().get('_resume_best_val_loss'),
     )
     model = result['model']
 
-    # Test generation
+    # Test generation (BPE models use tok.decode)
     print("\nSample generations:")
     for prompt in ['HELLO', 'HOW ARE YOU', 'TELL ME A JOKE', 'WHO ARE YOU', 'THANKS']:
         out = generate(model, prompt, 50, temperature=0.8, device=device)

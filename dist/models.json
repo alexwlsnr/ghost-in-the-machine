@@ -181,6 +181,35 @@
       "temp": 0.4
     },
     {
+      "id": "wisp-bpe",
+      "name": "Wisp BPE",
+      "description": "BPE fp32 — 7.6M params · 15MB · ~900 char context",
+      "bin": "model_wisp_bpe.bin",
+      "json": "model_wisp_bpe.json",
+      "params": "7.6M",
+      "ctx": 256,
+      "size_mb": 15.1,
+      "available": true,
+      "primary": true,
+      "max_new": 120,
+      "temp": 0.7
+    },
+    {
+      "id": "wisp-bpe-ternary",
+      "name": "Wisp BPE Ternary",
+      "description": "BPE ternary {-1,0,+1} — 6.3M params · 11.6MB · ~900 char context",
+      "bin": "model_wisp_bpe_ternary.bin",
+      "json": "model_wisp_bpe_ternary.json",
+      "params": "6.3M",
+      "ctx": 256,
+      "size_mb": 11.6,
+      "available": true,
+      "primary": true,
+      "max_new": 80,
+      "temp": 0.6,
+      "rep_penalty": 1.35
+    },
+    {
       "id": "spec512-v1.2",
       "name": "Spec512 v1.2",
       "description": "Spec512 trained on clean filtered dataset \u2014 better quality output",

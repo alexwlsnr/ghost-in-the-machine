@@ -19,7 +19,7 @@ echo "  Checkpoint: $CHECKPOINT"
 echo "  Log:        $LOG"
 echo ""
 
-nohup .venv/bin/python3 py/train_transformer.py \
+nohup .venv/bin/python3 -u py/train_transformer.py \
     --file "$DATASET" \
     --checkpoint "$CHECKPOINT" \
     --arch classic \

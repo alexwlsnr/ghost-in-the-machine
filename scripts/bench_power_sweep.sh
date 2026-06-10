@@ -25,7 +25,7 @@ MAX_LEN="${MAX_LEN:-256}"
 BATCH="${BATCH:-32}"
 
 case "$GPU" in
-  5080)   LIMITS="150 200 250 300 360" ;;
+  5080)   LIMITS="300 320 340 360 390" ;;
   3070)   LIMITS="120 140 165 185 220" ;;
   custom) shift; LIMITS="$*" ;;
   *)      echo "Usage: $0 [5080|3070|custom <watts...>]"; exit 1 ;;

@@ -75,6 +75,7 @@ jobs:
         run: |
           cp ts/dist/tier2_transformer.js dist/
           cp ts/dist/gpu_engine.js dist/
+          cp ts/dist/bpe_tokenizer.js dist/
 
       # ── Always: install node deps for tests, verify, deploy ───────────
       - name: Install node deps (for tests)

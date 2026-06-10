@@ -335,6 +335,20 @@ def serialize(
         "architecture":  arch,
         "sections":      sections,
     }
+
+    # Embed BPE tokenizer if checkpoint references one
+    tok_file = arch.get('tokenizer_file')
+    if tok_file:
+        tok_path = Path(tok_file)
+        if not tok_path.exists():
+            # Try path relative to checkpoint
+            tok_path = Path(checkpoint_path).parent / tok_path.name
+        if tok_path.exists():
+            manifest['tokenizer'] = json.loads(tok_path.read_text())
+            print(f"Tokenizer embedded from {tok_path} ({tok_path.stat().st_size // 1024} KB)")
+        else:
+            print(f"Warning: tokenizer_file {tok_file} not found — manifest will lack tokenizer")
+
     json_path.write_text(json.dumps(manifest, indent=2))
 
     total = sum(s["size"] for s in sections.values())

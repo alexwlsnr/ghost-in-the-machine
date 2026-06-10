@@ -1,6 +1,7 @@
 /**
  * Tier 2.5 Ghost Transformer — Float32 Orchestrator (fixed lengths)
  */
+import { BPETokenizer } from './bpe_tokenizer.js';
 const PAD = 256;
 const SEP = 1; // ASCII SOH — query/response separator (matches Python SEP_TOKEN)
 const EOS = 257;
@@ -46,6 +47,7 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const wasm = await WebAssembly.instantiate(wasmBuf);
     const api = wasm.instance.exports;
     const manifest = JSON.parse(new TextDecoder().decode(jsonBuf));
+    const bpe = manifest.tokenizer ? new BPETokenizer(manifest.tokenizer) : undefined;
     const sec = manifest.sections;
     const mem = api.memory;
     // CRITICAL: Wasm module uses memory [0, __heap_base) for its own stack/data.
@@ -102,7 +104,7 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
             sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
         }
     }
-    return { api, manifest: manifest.architecture, sec, base, sparseBuffers };
+    return { api, manifest: manifest.architecture, sec, base, sparseBuffers, bpe };
 }
 export function encode(text) {
     const t = [];
@@ -458,14 +460,16 @@ function prefill(api, sec, arch, tokens, base, cache, sparseBuffers) {
  * Turns are added newest-first; oldest turns are silently dropped when the
  * context budget (maxLen) would be exceeded.
  */
-export function buildContextTokens(history, query, maxLen, maxHistory = 1) {
-    const queryTokens = [...encode(query.toUpperCase()), SEP];
+export function buildContextTokens(history, query, maxLen, maxHistory = 1, bpe) {
+    const _enc = bpe ? (s) => bpe.encode(s) : encode;
+    const _SEP = bpe ? bpe.SEP : SEP;
+    const queryTokens = [..._enc(query.toUpperCase()), _SEP];
     let tokens = queryTokens;
     const recent = history.slice(-maxHistory);
     for (const turn of [...recent].reverse()) {
         const chunk = [
-            ...encode(turn.q.toUpperCase()), SEP,
-            ...encode(turn.r.toUpperCase()), SEP,
+            ..._enc(turn.q.toUpperCase()), _SEP,
+            ..._enc(turn.r.toUpperCase()), _SEP,
         ];
         if (tokens.length + chunk.length >= maxLen)
             break;
@@ -524,12 +528,19 @@ export function sampleFromLogits(logits, temp, topK, topP, rand, repPenalty = 1.
 }
 export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = Math.random, cache, topK = 0, topP = 1.0, history, gpuEngine) {
     const { api, manifest: arch, sec, base } = model;
+    const bpeT = model.bpe;
+    // Token-type helpers — byte-level defaults when no BPE tokenizer present
+    const _SEP = bpeT ? bpeT.SEP : SEP;
+    const _EOS = bpeT ? bpeT.EOS : EOS;
+    const _PAD = bpeT ? bpeT.PAD : PAD;
+    const _enc = bpeT ? (s) => bpeT.encode(s) : encode;
+    const _dec = bpeT
+        ? (id) => bpeT.decodeToken(id)
+        : (id) => (id < 256 && id !== SEP) ? String.fromCharCode(id) : '';
     const win = arch.max_len - 1;
-    // Build token sequence — with history if provided, bare query otherwise.
     const tokens = (history && history.length > 0)
-        ? buildContextTokens(history, prompt, win)
-        : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
-    // Repetition penalty: 1.35 for larger models (ctx≥512), 1.15 subtle for small ones
+        ? buildContextTokens(history, prompt, win, 1, bpeT)
+        : [..._enc(prompt.toUpperCase()).slice(0, win - 1), _SEP];
     const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
     const REP_WINDOW = 32;
     const generated = [];
@@ -539,20 +550,20 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
         let logits = await gpuEngine.prefill(tokens);
         for (let s = 0; s < maxNew; s++) {
             if (gpuEngine.seqLen >= win) {
-                yield { char: '', token: PAD, done: true };
+                yield { char: '', token: _PAD, done: true };
                 return;
             }
             await new Promise((r) => setTimeout(r, 0));
             const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-            if (next === EOS || next === PAD) {
+            if (next === _EOS || next === _PAD) {
                 yield { char: '', token: next, done: true };
                 return;
             }
             generated.push(next);
-            yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
+            yield { char: _dec(next), token: next, done: false };
             logits = await gpuEngine.step(next);
         }
-        yield { char: '', token: PAD, done: true };
+        yield { char: '', token: _PAD, done: true };
         return;
     }
     // -- Cached path ----------------------------------------------------
@@ -562,39 +573,39 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
         let logits = prefill(api, sec, arch, tokens, base, cache, sp);
         for (let s = 0; s < maxNew; s++) {
             if (cache.length >= win) {
-                yield { char: '', token: PAD, done: true };
+                yield { char: '', token: _PAD, done: true };
                 return;
             }
             await new Promise((r) => setTimeout(r, 0));
             const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-            if (next === EOS || next === PAD) {
+            if (next === _EOS || next === _PAD) {
                 yield { char: '', token: next, done: true };
                 return;
             }
             generated.push(next);
-            yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
+            yield { char: _dec(next), token: next, done: false };
             logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
         }
-        yield { char: '', token: PAD, done: true };
+        yield { char: '', token: _PAD, done: true };
         return;
     }
     // -- Full-recompute path (no cache — backward compatible) -----------
     for (let s = 0; s < maxNew; s++) {
         if (tokens.length >= win) {
-            yield { char: '', token: PAD, done: true };
+            yield { char: '', token: _PAD, done: true };
             return;
         }
         await new Promise((r) => setTimeout(r, 0));
         const logits = forward(api, sec, arch, tokens, base);
         const next = sampleFromLogits(logits, temp, topK, topP, rand, repPenalty, generated.slice(-REP_WINDOW));
-        if (next === EOS || next === PAD) {
+        if (next === _EOS || next === _PAD) {
             yield { char: '', token: next, done: true };
             return;
         }
         generated.push(next);
         tokens.push(next);
-        yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
+        yield { char: _dec(next), token: next, done: false };
     }
-    yield { char: '', token: PAD, done: true };
+    yield { char: '', token: _PAD, done: true };
 }
 //# sourceMappingURL=tier2_transformer.js.map
