@@ -79,7 +79,7 @@ run_managed "shade_bpe_ternary" \
     --n-layers  4 \
     --d-ff      2048 \
     --max-len   256 \
-    --batch-size 64 \
+    --batch-size 32 \
     --lr        0.0008 \
     --epochs    100 \
     --val-frac  0.02 \
