@@ -19,13 +19,23 @@ log() { echo "[chain $(date -u '+%H:%M:%S UTC')] $*"; }
 
 is_done() {
     local status_file="$1"
-    $VENV -c "
+    local attempt
+    for attempt in 1 2 3; do
+        result=$($VENV -c "
 import json, sys
 try:
-    d = json.load(open('$status_file' if '$status_file' else '/dev/null'))
-    sys.exit(0 if d.get('state') in ('done','early_stopped') else 1)
-except: sys.exit(1)
-" 2>/dev/null
+    d = json.load(open('$status_file'))
+    done = d.get('state') in ('done','early_stopped') or bool(d.get('stopped_early'))
+    sys.exit(0 if done else 1)
+except Exception as e:
+    sys.exit(2)
+" 2>/dev/null; echo $?)
+        [ "$result" = "0" ] && return 0
+        [ "$result" = "1" ] && return 1
+        # exit code 2 = parse error — wait and retry
+        sleep 2
+    done
+    return 1
 }
 
 run_managed() {
@@ -55,6 +65,7 @@ run_managed() {
             --status-file "$status_file" \
             "$@" || true   # don't abort chain on crash
 
+        sleep 3  # let status file flush before checking
         if is_done "$status_file"; then
             log "[$label] training complete after $attempt attempt(s)"
             return 0
