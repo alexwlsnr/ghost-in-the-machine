@@ -1112,12 +1112,23 @@ if __name__ == '__main__':
         else:
             model = TinyTransformer(**_kw)
         model.load_state_dict(ckpt['model_state'])
-        start_epoch = ckpt.get('epoch', 0)
+        # Fine-tune detection: resume path differs from output checkpoint path.
+        # In that case the source checkpoint's epoch/best_val_loss belong to a
+        # different run — reset so this run counts its own epochs from 0.
+        is_finetune = args.checkpoint and (
+            __import__('os').path.realpath(args.resume) !=
+            __import__('os').path.realpath(args.checkpoint)
+        )
+        if is_finetune:
+            start_epoch = 0
+            _resume_best_val_loss = None
+            print(f"Fine-tune mode (source != output): starting from epoch 0, {args.epochs} epochs")
+        else:
+            start_epoch = ckpt.get('epoch', 0)
+            _resume_best_val_loss = ckpt.get('best_val_loss', None)
+            remaining = max(1, args.epochs - start_epoch)
+            print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
         remaining = max(1, args.epochs - start_epoch)
-        # Preserve best_val_loss from checkpoint so resumed runs never overwrite
-        # a better checkpoint just because their first epoch beats float('inf')
-        _resume_best_val_loss = ckpt.get('best_val_loss', None)
-        print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
     else:
         vocab_sz = tok.vocab_size if tok else VOCAB_SIZE
         if args.arch == 'ternary':
