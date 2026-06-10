@@ -666,7 +666,7 @@ export async function* generate(
       await new Promise((r) => setTimeout(r, 0));
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
-      if (next === _EOS || next === _PAD) { yield { char: '', token: next, done: true }; return; }
+      if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
       generated.push(next);
       yield { char: _dec(next), token: next, done: false };
       logits = await gpuEngine.step(next);
@@ -685,7 +685,7 @@ export async function* generate(
       await new Promise((r) => setTimeout(r, 0));
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
-      if (next === _EOS || next === _PAD) { yield { char: '', token: next, done: true }; return; }
+      if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
       generated.push(next);
       yield { char: _dec(next), token: next, done: false };
       logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
@@ -701,7 +701,7 @@ export async function* generate(
     const logits = forward(api, sec, arch, tokens, base);
     const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                    repPenalty, generated.slice(-REP_WINDOW));
-    if (next === _EOS || next === _PAD) { yield { char: '', token: next, done: true }; return; }
+    if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
     generated.push(next);
     tokens.push(next);
     yield { char: _dec(next), token: next, done: false };

@@ -75,12 +75,7 @@ def generate_bpe(model, tok, prompt, *, max_new=100, temperature=0.7,
                 probs = torch.clamp(probs, min=0)
                 next_token = torch.multinomial(probs, 1).item()
 
-            if next_token in (tok.EOS, tok.PAD):
-                break
-            if next_token != tok.SEP:
-                tokens.append(next_token)
-                generated.append(next_token)
-            if len(tokens) >= model.max_len:
+            if next_token in (tok.EOS, tok.PAD, tok.SEP):
                 break
 
     return tok.decode(generated)
