@@ -602,15 +602,34 @@ class _TernarySwiGLUFFN(nn.Module):
         return self.w3(F.silu(self.w1(x)) * self.w2(x))
 
 
-class _TernaryModernBlock(nn.Module):
-    """Pre-norm block: RMSNorm + ternary RoPE attention + ternary SwiGLU FFN."""
+class _TernaryReLU2FFN(nn.Module):
+    """Squared-ReLU FFN with ternary projections.
 
-    def __init__(self, d_model: int, n_heads: int, d_ff: int, dropout: float = 0.1):
+    relu(x)^2 outperforms SwiGLU under ternary weights per BitNet b1.58
+    ablation — the gating mechanism in SwiGLU interacts poorly with ternary
+    sparsity. Uses 2 matrices vs SwiGLU's 3, slightly fewer params.
+    """
+
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = TernaryLinear(d_model, d_ff, bias=False)
+        self.w2 = TernaryLinear(d_ff, d_model, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(F.relu(self.w1(x)) ** 2)
+
+
+class _TernaryModernBlock(nn.Module):
+    """Pre-norm block: RMSNorm + ternary RoPE attention + ternary FFN."""
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int,
+                 ffn_type: str = 'swiglu', dropout: float = 0.1):
         super().__init__()
         self.norm1 = RMSNorm(d_model)
         self.attn  = _TernaryAttentionRoPE(d_model, n_heads, dropout=dropout)
         self.norm2 = RMSNorm(d_model)
-        self.ff    = _TernarySwiGLUFFN(d_model, d_ff)
+        self.ff    = (_TernaryReLU2FFN(d_model, d_ff) if ffn_type == 'relu2'
+                      else _TernarySwiGLUFFN(d_model, d_ff))
 
     def forward(self, x: torch.Tensor,
                 freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -620,17 +639,22 @@ class _TernaryModernBlock(nn.Module):
 
 
 class TinyTransformerTernaryModern(nn.Module):
-    """Ternary transformer with modern components: RMSNorm + SwiGLU + RoPE.
+    """Ternary transformer with modern components: RMSNorm + RoPE + SwiGLU or ReLU².
 
     Combines the ternary weight quantisation of TinyTransformerTernary with
     the architectural improvements of TinyTransformerModern. Intended as the
     architecture for Spectre and future large ternary models.
+
+    ffn_type='swiglu' (default): SwiGLU gated FFN, 3 ternary matrices per block.
+    ffn_type='relu2':            Squared-ReLU FFN, 2 ternary matrices per block.
+                                 BitNet b1.58 ablation favours relu2 for ternary.
     """
 
     arch = 'ternary_modern'
 
     def __init__(self, vocab_size: int, d_model: int, n_heads: int,
-                 n_layers: int, d_ff: int, max_len: int, dropout: float = 0.1):
+                 n_layers: int, d_ff: int, max_len: int,
+                 ffn_type: str = 'swiglu', dropout: float = 0.1):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model    = d_model
@@ -638,6 +662,7 @@ class TinyTransformerTernaryModern(nn.Module):
         self.n_layers   = n_layers
         self.d_ff       = d_ff
         self.max_len    = max_len
+        self.ffn_type   = ffn_type
 
         self.token_embed = nn.Embedding(vocab_size, d_model)
         self.register_buffer(
@@ -646,7 +671,8 @@ class TinyTransformerTernaryModern(nn.Module):
             persistent=False,
         )
         self.blocks = nn.ModuleList([
-            _TernaryModernBlock(d_model, n_heads, d_ff, dropout=dropout)
+            _TernaryModernBlock(d_model, n_heads, d_ff,
+                                ffn_type=ffn_type, dropout=dropout)
             for _ in range(n_layers)
         ])
         self.ln_final = RMSNorm(d_model)
@@ -1030,6 +1056,8 @@ def train_transformer(
                     'n_layers': model.n_layers,
                     'd_ff': model.d_ff,
                     'max_len': model.max_len,
+                    **(({'ffn_type': model.ffn_type}
+                        if isinstance(model, TinyTransformerTernaryModern) else {})),
                     'weight_bits': 4,
                     **(({'tokenizer_file': checkpoint_file.replace('.pt', '_tokenizer.json'),
                          'tokenizer_type': 'bpe'}) if tok else {}),
@@ -1165,6 +1193,8 @@ if __name__ == '__main__':
                         help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
     parser.add_argument('--arch', default='classic', choices=['classic', 'modern', 'ternary', 'ternary_modern'],
                         help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
+    parser.add_argument('--ffn-type', default='swiglu', choices=['swiglu', 'relu2'],
+                        help='FFN for ternary_modern: swiglu (default) or relu2 (BitNet-recommended for ternary)')
     parser.add_argument('--tokenizer', type=str, default=None,
                         help='path to BPE tokenizer JSON (from train_bpe.py); omit for byte-level')
     parser.add_argument('--mask-query-loss', action='store_true',
@@ -1220,7 +1250,8 @@ if __name__ == '__main__':
                    n_heads=arch['n_heads'], n_layers=arch['n_layers'],
                    d_ff=arch['d_ff'], max_len=arch['max_len'])
         if arch.get('arch') == 'ternary_modern':
-            model = TinyTransformerTernaryModern(**_kw)
+            model = TinyTransformerTernaryModern(**_kw,
+                ffn_type=arch.get('ffn_type', 'swiglu'))
         elif arch.get('arch') == 'ternary':
             model = TinyTransformerTernary(**_kw)
         elif arch.get('arch') == 'modern':
@@ -1260,6 +1291,7 @@ if __name__ == '__main__':
                 n_layers=args.n_layers,
                 d_ff=args.d_ff,
                 max_len=args.max_len,
+                ffn_type=args.ffn_type,
             )
         elif args.arch == 'ternary':
             model = TinyTransformerTernary(
