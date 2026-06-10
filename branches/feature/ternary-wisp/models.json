@@ -223,6 +223,22 @@
       "max_new": 120,
       "rep_penalty": 1.35,
       "temp": 0.5
+    },
+    {
+      "id": "shade-bpe-ternary",
+      "name": "Shade BPE Ternary",
+      "description": "BPE ternary {-1,0,+1} — 11M params · 19.6MB · ~900 char context · mixed case",
+      "bin": "model_shade_bpe_ternary.bin",
+      "json": "model_shade_bpe_ternary.json",
+      "params": "11M",
+      "ctx": 256,
+      "size_mb": 19.6,
+      "available": true,
+      "primary": true,
+      "max_new": 100,
+      "temp": 0.5,
+      "rep_penalty": 1.2,
+      "top_k": 20
     }
   ]
 }
