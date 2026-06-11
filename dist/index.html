@@ -668,8 +668,41 @@ async function switchModel(id) {
   // Show loading overlay for model switch
   loadingTitle.textContent = `LOADING ${reg.name.toUpperCase()}...`;
   loadingFill.style.width = '10%';
-  loadingText.textContent = `Fetching ${reg.bin} (${reg.size_mb} MB)...`;
   loading.classList.remove('hidden');
+
+  const LOADING_PHRASES = [
+    'Reticulating splines...',
+    'Untangling the neural webs...',
+    'Charging the ectoplasm...',
+    'Whispering to the weights...',
+    'Consulting the parameter oracle...',
+    'Flattening the embedding space...',
+    'Reversing the polarity...',
+    'Summoning attention heads...',
+    'Calibrating the ghost frequency...',
+    'Warming up the ternary neurons...',
+    'Aligning the transformer layers...',
+    'Invoking the matrix spirits...',
+    'Defragmenting the latent space...',
+    'Teaching weights to haunt...',
+    'Quantizing the soul...',
+    'Negotiating with the softmax...',
+    'Initializing existential dread...',
+    'Counting the zeroes and ones...',
+    'Tuning the spectral frequencies...',
+    'Greasing the attention mechanisms...',
+    'Establishing ghost protocol...',
+    'Rerouting through the void...',
+    'Cross-referencing the corpus...',
+    'Unpacking the binary séance...',
+    'Synchronizing parallel universes...',
+  ];
+  let _phraseIdx = Math.floor(Math.random() * LOADING_PHRASES.length);
+  loadingText.textContent = LOADING_PHRASES[_phraseIdx];
+  const _phraseTicker = setInterval(() => {
+    _phraseIdx = (_phraseIdx + 1) % LOADING_PHRASES.length;
+    loadingText.textContent = LOADING_PHRASES[_phraseIdx];
+  }, 1800);
 
   try {
     const loaded = await loadModel({
@@ -691,7 +724,7 @@ async function switchModel(id) {
 
     // Try to create GPU engine for eligible models
     if (gpuAvailable && shouldUseGPU(loaded.manifest)) {
-      loadingText.textContent = 'Initialising GPU engine...';
+      loadingText.textContent = 'Supercharging with WebGPU...';
       gpuEngines[id] = await GPUEngine.create(
         loaded.manifest, loaded.sec, loaded.api.memory, loaded.base
       ).catch(e => { console.warn('WebGPU init failed:', e); return null; });
@@ -700,6 +733,7 @@ async function switchModel(id) {
       gpuEngines[id] = null;
     }
 
+    clearInterval(_phraseTicker);
     loadingFill.style.width = '100%';
     loadingText.textContent = 'Ready.';
 
@@ -716,6 +750,7 @@ async function switchModel(id) {
     }, 400);
 
   } catch(e) {
+    clearInterval(_phraseTicker);
     reg._loading = false;
     loading.classList.add('hidden');
     appendLine(`LOAD ERROR [${reg.name}]: ${e.message}`, 'error');
@@ -801,7 +836,40 @@ async function boot() {
   // Load the default model
   loadingTitle.textContent = `LOADING ${defaultModel.name.toUpperCase()}...`;
   loadingFill.style.width = '10%';
-  loadingText.textContent = `Loading ${defaultModel.bin}...`;
+
+  const BOOT_PHRASES = [
+    'Reticulating splines...',
+    'Untangling the neural webs...',
+    'Charging the ectoplasm...',
+    'Whispering to the weights...',
+    'Consulting the parameter oracle...',
+    'Flattening the embedding space...',
+    'Reversing the polarity...',
+    'Summoning attention heads...',
+    'Calibrating the ghost frequency...',
+    'Warming up the ternary neurons...',
+    'Aligning the transformer layers...',
+    'Invoking the matrix spirits...',
+    'Defragmenting the latent space...',
+    'Teaching weights to haunt...',
+    'Quantizing the soul...',
+    'Negotiating with the softmax...',
+    'Initializing existential dread...',
+    'Counting the zeroes and ones...',
+    'Tuning the spectral frequencies...',
+    'Greasing the attention mechanisms...',
+    'Establishing ghost protocol...',
+    'Rerouting through the void...',
+    'Cross-referencing the corpus...',
+    'Unpacking the binary séance...',
+    'Synchronizing parallel universes...',
+  ];
+  let _bootPhraseIdx = Math.floor(Math.random() * BOOT_PHRASES.length);
+  loadingText.textContent = BOOT_PHRASES[_bootPhraseIdx];
+  const _bootTicker = setInterval(() => {
+    _bootPhraseIdx = (_bootPhraseIdx + 1) % BOOT_PHRASES.length;
+    loadingText.textContent = BOOT_PHRASES[_bootPhraseIdx];
+  }, 1800);
 
   defaultModel._loading = true;
   renderSwitcher();
@@ -822,7 +890,7 @@ async function boot() {
 
     // Try GPU engine for eligible models
     if (gpuAvailable && shouldUseGPU(loaded.manifest)) {
-      loadingText.textContent = 'Initialising GPU engine...';
+      loadingText.textContent = 'Supercharging with WebGPU...';
       gpuEngines[defaultModel.id] = await GPUEngine.create(
         loaded.manifest, loaded.sec, loaded.api.memory, loaded.base
       ).catch(e => { console.warn('WebGPU init failed:', e); return null; });
@@ -830,10 +898,12 @@ async function boot() {
       gpuEngines[defaultModel.id] = null;
     }
 
+    clearInterval(_bootTicker);
     loadingFill.style.width = '100%';
     loadingText.textContent = 'Ready.';
 
   } catch(e) {
+    clearInterval(_bootTicker);
     defaultModel._loading = false;
     appendLine(`LOAD ERROR: ${e.message}`, 'error');
     loading.classList.add('hidden');
