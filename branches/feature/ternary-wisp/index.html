@@ -152,6 +152,18 @@
   .legacy-item.active { color: #33ff33; background: #33ff3311; }
   .legacy-item.loading { color: #ffaa00; cursor: default; }
   .legacy-item-size { font-size: 15px; color: #33ff3366; flex-shrink: 0; }
+  .legacy-section {
+    padding: 6px 16px 3px;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 13px;
+    color: #33ff3344;
+    letter-spacing: 0.12em;
+    border-top: 1px solid #33ff3318;
+    margin-top: 2px;
+    user-select: none;
+    pointer-events: none;
+  }
+  .legacy-section:first-child { border-top: none; margin-top: 0; }
 
   /* Progress bar inside loading chip */
   .chip-progress {
@@ -591,21 +603,36 @@ function renderSwitcher() {
     switcher.insertBefore(chip, legacySpacer);
   }
 
-  // Legacy dropdown items
+  // Legacy dropdown items — grouped by section
+  const sectionLabels = { bpe: 'BPE TERNARY', ablation: 'ABLATIONS', classic: 'CLASSIC', reference: 'REFERENCE' };
+  const sectionOrder  = ['bpe', 'ablation', 'classic', 'reference'];
+  const grouped = {};
   for (const reg of secondary) {
     if (!reg.available) continue;
+    const key = reg.group || 'reference';
+    (grouped[key] = grouped[key] || []).push(reg);
+  }
+  for (const key of sectionOrder) {
+    const items = grouped[key];
+    if (!items || !items.length) continue;
     hasLegacy = true;
-    const item = document.createElement('div');
-    item.className = 'legacy-item' + (reg.id === activeId ? ' active' : '') + (reg._loading ? ' loading' : '');
-    item.innerHTML = `<span>${reg.name.toUpperCase()}</span><span class="legacy-item-size">${reg.size_mb}MB</span>`;
-    if (reg._loading) {
-      const bar = document.createElement('span'); bar.className = 'chip-progress';
-      const fill = document.createElement('span'); fill.className = 'chip-progress-fill'; fill.id = `chip-fill-${reg.id}`;
-      bar.appendChild(fill); item.appendChild(bar);
-    } else if (reg.id !== activeId) {
-      item.addEventListener('click', () => { closeLegacyMenu(); switchModel(reg.id); });
+    const hdr = document.createElement('div');
+    hdr.className = 'legacy-section';
+    hdr.textContent = sectionLabels[key] || key.toUpperCase();
+    legacyMenu.appendChild(hdr);
+    for (const reg of items) {
+      const item = document.createElement('div');
+      item.className = 'legacy-item' + (reg.id === activeId ? ' active' : '') + (reg._loading ? ' loading' : '');
+      item.innerHTML = `<span>${reg.name.toUpperCase()}</span><span class="legacy-item-size">${reg.size_mb}MB</span>`;
+      if (reg._loading) {
+        const bar = document.createElement('span'); bar.className = 'chip-progress';
+        const fill = document.createElement('span'); fill.className = 'chip-progress-fill'; fill.id = `chip-fill-${reg.id}`;
+        bar.appendChild(fill); item.appendChild(bar);
+      } else if (reg.id !== activeId) {
+        item.addEventListener('click', () => { closeLegacyMenu(); switchModel(reg.id); });
+      }
+      legacyMenu.appendChild(item);
     }
-    legacyMenu.appendChild(item);
   }
   legacyWrapper.style.display = hasLegacy ? '' : 'none';
 }
