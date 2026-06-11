@@ -336,6 +336,22 @@
       "top_k": 20
     },
     {
+      "id": "spectre-v1",
+      "name": "Spectre v1",
+      "description": "35M params · 24MB · ternary_modern · RoPE + RMSNorm + SwiGLU · trained on Revenant (38M tokens)",
+      "bin": "model_spectre_v1.bin",
+      "json": "model_spectre_v1.json",
+      "params": "35.6M",
+      "ctx": 256,
+      "size_mb": 24.2,
+      "available": true,
+      "primary": true,
+      "max_new": 120,
+      "temp": 0.5,
+      "rep_penalty": 1.2,
+      "top_k": 20
+    },
+    {
       "id": "shade-bpe-factual",
       "name": "Shade BPE Factual",
       "description": "Ablation: factual fine-tune on Shade BPE Ternary — 11M params · 19.6MB",
