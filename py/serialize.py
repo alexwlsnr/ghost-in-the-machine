@@ -38,10 +38,14 @@ def get_arch(state_dict: dict, checkpoint: dict) -> dict:
         if "d_model"    not in arch: arch["d_model"]    = head.shape[1]
     # Propagate modern arch flags from checkpoint to manifest
     if arch.get("arch") == "modern":
-        # Default all flags to True if not explicitly stored
         for flag in ("use_swiglu", "use_rope", "use_rmsnorm", "tie_weights"):
             if flag not in arch:
                 arch[flag] = True
+    if arch.get("arch") == "ternary_modern":
+        arch.setdefault("use_rope",    True)
+        arch.setdefault("use_rmsnorm", True)
+        arch.setdefault("use_swiglu",  arch.get("ffn_type", "swiglu") == "swiglu")
+        arch.setdefault("tie_weights", True)
     return arch
 
 
@@ -202,7 +206,7 @@ def serialize(
 
     def add(name: str, tensor: torch.Tensor, *, quantize: bool = False):
         t = tensor.detach().cpu().to(torch.float32)
-        is_ternary_arch = arch.get("arch") == "ternary"
+        is_ternary_arch = arch.get("arch") in ("ternary", "ternary_modern")
 
         if quantize and is_ternary_arch:
             raw, scale = quantize_ternary(t)
@@ -242,14 +246,46 @@ def serialize(
         if scales_raw is not None:
             buf.extend(scales_raw)
 
-    is_ternary = arch.get("arch") == "ternary"
-    is_modern  = arch.get("arch") == "modern"
+    is_ternary        = arch.get("arch") == "ternary"
+    is_modern         = arch.get("arch") == "modern"
+    is_ternary_modern = arch.get("arch") == "ternary_modern"
     use_swiglu = arch.get("use_swiglu", True) if is_modern else False
     use_rope   = arch.get("use_rope",   True) if is_modern else False
     use_rmsnorm= arch.get("use_rmsnorm",True) if is_modern else False
     tied       = arch.get("tie_weights",True) if is_modern else False
+    ffn_type   = arch.get("ffn_type", "swiglu")  # ternary_modern only
 
-    if is_ternary:
+    if is_ternary_modern:
+        # TinyTransformerTernaryModern: RoPE (no pos_embed), RMSNorm (no bias),
+        # ternary Q/K/V/O (no bias), SwiGLU (w1/w2/w3) or ReLU² (w1/w2), weight-tied head.
+        # Embeddings NOT pre-scaled by sqrt(d) — ternary forward does its own scaling.
+        add("token_embed", state["token_embed.weight"])
+        # no pos_embed — RoPE frequencies are computed at runtime
+        for li in range(nlayers):
+            pfx = f"enc{li}"
+            add(f"{pfx}_ln1_w", state[f"blocks.{li}.norm1.weight"])
+            add(f"{pfx}_ln1_b", torch.zeros(d))   # RMSNorm has no bias
+            add(f"{pfx}_ln2_w", state[f"blocks.{li}.norm2.weight"])
+            add(f"{pfx}_ln2_b", torch.zeros(d))
+            for sname, key in [("q","q_proj"),("k","k_proj"),("v","v_proj"),("o","o_proj")]:
+                add(f"{pfx}_{sname}_weight", state[f"blocks.{li}.attn.{key}.weight"], quantize=True)
+                add(f"{pfx}_{sname}_bias",   torch.zeros(d))  # no bias
+            if ffn_type == "relu2":
+                add(f"{pfx}_ff1_weight", state[f"blocks.{li}.ff.w1.weight"], quantize=True)
+                add(f"{pfx}_ff1_bias",   torch.zeros(state[f"blocks.{li}.ff.w1.weight"].shape[0]))
+                add(f"{pfx}_ff2_weight", state[f"blocks.{li}.ff.w2.weight"], quantize=True)
+                add(f"{pfx}_ff2_bias",   torch.zeros(d))
+            else:  # swiglu
+                add(f"{pfx}_ff_gate_weight", state[f"blocks.{li}.ff.w1.weight"], quantize=True)
+                add(f"{pfx}_ff_val_weight",  state[f"blocks.{li}.ff.w2.weight"], quantize=True)
+                add(f"{pfx}_ff2_weight",     state[f"blocks.{li}.ff.w3.weight"], quantize=True)
+                add(f"{pfx}_ff1_bias", torch.zeros(state[f"blocks.{li}.ff.w1.weight"].shape[0]))
+                add(f"{pfx}_ff2_bias", torch.zeros(d))
+        add("lnf_w", state["ln_final.weight"])
+        add("lnf_b", torch.zeros(d))   # RMSNorm has no bias
+        add("head_weight", state["token_embed.weight"])  # tied, unscaled
+
+    elif is_ternary:
         # TinyTransformerTernary state dict: blocks.{li}.attn.{q/k/v/o}_proj + ff.{w1/w2}
         # NOTE: ternary forward() does NOT multiply embeddings by sqrt(d_model),
         # so store raw weights here (no pre-scaling unlike classic/modern arch).
