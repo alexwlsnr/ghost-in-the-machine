@@ -152,6 +152,18 @@
   .legacy-item.active { color: #33ff33; background: #33ff3311; }
   .legacy-item.loading { color: #ffaa00; cursor: default; }
   .legacy-item-size { font-size: 15px; color: #33ff3366; flex-shrink: 0; }
+  .legacy-section {
+    padding: 6px 16px 3px;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 13px;
+    color: #33ff3344;
+    letter-spacing: 0.12em;
+    border-top: 1px solid #33ff3318;
+    margin-top: 2px;
+    user-select: none;
+    pointer-events: none;
+  }
+  .legacy-section:first-child { border-top: none; margin-top: 0; }
 
   /* Progress bar inside loading chip */
   .chip-progress {
@@ -364,11 +376,14 @@
 
     .model-chip { font-size: 16px; padding: 3px 10px; }
     #legacy-btn { font-size: 14px; padding: 3px 9px; }
-    /* Dropdown anchors to viewport bottom on small screens to avoid clipping */
+    /* Fix: overflow-x:auto on model-switcher creates a clipping context that
+       cuts off the absolutely-positioned dropdown. Switch to fixed so it
+       escapes the scroll container and anchors to the viewport instead. */
     #legacy-menu {
-      min-width: 180px;
-      right: 0;
-      /* On narrow screens open downward but clamp to viewport */
+      position: fixed;
+      top: 42px; /* sits just below the model-switcher bar */
+      right: 8px;
+      min-width: 200px;
       max-height: 60vh;
       overflow-y: auto;
     }
@@ -412,7 +427,10 @@
       max-width: 55%;
     }
 
-    #simd-badge, #mem-badge { font-size: 12px; padding: 2px 6px; }
+    #simd-badge, #mem-badge, #punct-badge { font-size: 11px; padding: 1px 5px; margin-left: 5px; }
+
+    /* Status bar right side: shrink model-info more to give badges room */
+    #model-info { max-width: 40%; }
 
     /* Loading overlay */
     #loading-overlay { font-size: 20px; }
@@ -447,6 +465,7 @@
     <span id="model-info">---</span>
     <button id="simd-badge" style="display:none;font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #00ffff44;color:#00ffff;" title="Toggle SIMD kernel">⚡ SIMD</button>
     <button id="mem-badge" style="font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:transparent;border:1px solid #33ff3322;color:#33ff3344;" title="Enable conversation memory for all models (experimental on ctx=128)">○ MEM</button>
+    <button id="punct-badge" style="font-family:'VT323','Courier New',monospace;font-size:13px;padding:2px 8px;margin-left:10px;letter-spacing:1px;cursor:pointer;background:#33ff3311;border:1px solid #33ff3366;color:#33ff33;" title="Punctuation stop heuristic ON — stops generation when a token without a leading space follows end punctuation. Click to disable for raw output.">● PSTOP</button>
     <span id="perf-info">---</span>
   </div>
 
@@ -468,10 +487,12 @@
 // Model weights — versioned so they cache between reloads.
 const _t = Date.now();
 const { loadModel, encode, generate, createCache, detectSIMD, buildContextTokens } = await import('./tier2_transformer.js?t=' + _t);
+const { GPUEngine, shouldUseGPU } = await import('./gpu_engine.js?t=' + _t);
 
 // Detect SIMD support; track whether it's currently enabled (toggleable)
 const simdSupported = await detectSIMD();
 let simdEnabled = simdSupported;
+const gpuAvailable = !!(await navigator.gpu?.requestAdapter().catch(() => null));
 
 function activeWasmFile() {
   return (simdEnabled && simdSupported)
@@ -490,7 +511,7 @@ const perfInfo    = document.getElementById('perf-info');
 const switcher    = document.getElementById('model-switcher');
 
 let temperature = 0.8;
-const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
+const TEMP_MIN = 0.1, TEMP_MAX = 2.0, TEMP_STEP = 0.1;
 
 // ── Multi-model state ──────────────────────────────────────────────────────
 // registry: array of model descriptors from models.json
@@ -498,9 +519,10 @@ const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
 // activeId: currently active model id
 let registry   = [];
 let modelCache = {};
-let kvCaches   = {};   // id → KVCache — one per loaded model, reused across queries
-let histories  = {};   // id → Turn[] — conversation history per model
-let memoryOn   = false; // off by default — multi-turn training needs more data before enabling
+let kvCaches   = {};      // id → KVCache — one per loaded model, reused across queries
+let gpuEngines = {};      // id → GPUEngine | null — GPU engine per model (null if not eligible)
+let histories  = {};      // id → Turn[] — conversation history per model
+let memoryOn   = false;   // off by default — multi-turn training needs more data before enabling
 let activeId   = null;
 let isSwitching = false;
 
@@ -510,12 +532,12 @@ function updateTempDisplay() {
 }
 
 document.getElementById('temp-up').addEventListener('click', () => {
-  const idx = TEMP_PRESETS.indexOf(temperature);
-  if (idx < TEMP_PRESETS.length - 1) { temperature = TEMP_PRESETS[idx + 1]; updateTempDisplay(); }
+  temperature = Math.min(TEMP_MAX, Math.round((temperature + TEMP_STEP) * 10) / 10);
+  updateTempDisplay();
 });
 document.getElementById('temp-down').addEventListener('click', () => {
-  const idx = TEMP_PRESETS.indexOf(temperature);
-  if (idx > 0) { temperature = TEMP_PRESETS[idx - 1]; updateTempDisplay(); }
+  temperature = Math.max(TEMP_MIN, Math.round((temperature - TEMP_STEP) * 10) / 10);
+  updateTempDisplay();
 });
 
 function appendLine(text, cls = '') {
@@ -534,7 +556,9 @@ function setInputEnabled(enabled) {
 // ── Status bar ────────────────────────────────────────────────────────────
 function updateStatusBar(reg) {
   if (!reg) { modelInfo.textContent = '---'; return; }
-  modelInfo.textContent = `${reg.name.toUpperCase()} · ${reg.params} params · ${reg.ctx} ctx`;
+  const gpu = reg && gpuEngines[reg.id];
+  const kernel = gpu ? '⚡ WebGPU' : (simdEnabled && simdSupported ? '⚡ SIMD' : 'Wasm');
+  modelInfo.textContent = `${reg.name.toUpperCase()} · ${reg.params} params · ${reg.ctx} ctx · ${kernel}`;
 }
 
 // ── Model switcher chips ───────────────────────────────────────────────────
@@ -579,21 +603,36 @@ function renderSwitcher() {
     switcher.insertBefore(chip, legacySpacer);
   }
 
-  // Legacy dropdown items
+  // Legacy dropdown items — grouped by section
+  const sectionLabels = { bpe: 'BPE TERNARY', ablation: 'ABLATIONS', classic: 'CLASSIC', reference: 'REFERENCE' };
+  const sectionOrder  = ['bpe', 'ablation', 'classic', 'reference'];
+  const grouped = {};
   for (const reg of secondary) {
     if (!reg.available) continue;
+    const key = reg.group || 'reference';
+    (grouped[key] = grouped[key] || []).push(reg);
+  }
+  for (const key of sectionOrder) {
+    const items = grouped[key];
+    if (!items || !items.length) continue;
     hasLegacy = true;
-    const item = document.createElement('div');
-    item.className = 'legacy-item' + (reg.id === activeId ? ' active' : '') + (reg._loading ? ' loading' : '');
-    item.innerHTML = `<span>${reg.name.toUpperCase()}</span><span class="legacy-item-size">${reg.size_mb}MB</span>`;
-    if (reg._loading) {
-      const bar = document.createElement('span'); bar.className = 'chip-progress';
-      const fill = document.createElement('span'); fill.className = 'chip-progress-fill'; fill.id = `chip-fill-${reg.id}`;
-      bar.appendChild(fill); item.appendChild(bar);
-    } else if (reg.id !== activeId) {
-      item.addEventListener('click', () => { closeLegacyMenu(); switchModel(reg.id); });
+    const hdr = document.createElement('div');
+    hdr.className = 'legacy-section';
+    hdr.textContent = sectionLabels[key] || key.toUpperCase();
+    legacyMenu.appendChild(hdr);
+    for (const reg of items) {
+      const item = document.createElement('div');
+      item.className = 'legacy-item' + (reg.id === activeId ? ' active' : '') + (reg._loading ? ' loading' : '');
+      item.innerHTML = `<span>${reg.name.toUpperCase()}</span><span class="legacy-item-size">${reg.size_mb}MB</span>`;
+      if (reg._loading) {
+        const bar = document.createElement('span'); bar.className = 'chip-progress';
+        const fill = document.createElement('span'); fill.className = 'chip-progress-fill'; fill.id = `chip-fill-${reg.id}`;
+        bar.appendChild(fill); item.appendChild(bar);
+      } else if (reg.id !== activeId) {
+        item.addEventListener('click', () => { closeLegacyMenu(); switchModel(reg.id); });
+      }
+      legacyMenu.appendChild(item);
     }
-    legacyMenu.appendChild(item);
   }
   legacyWrapper.style.display = hasLegacy ? '' : 'none';
 }
@@ -610,6 +649,7 @@ async function switchModel(id) {
   // If cached, activate immediately
   if (modelCache[id]) {
     activeId = id;
+    if (reg.temp !== undefined) { temperature = reg.temp; updateTempDisplay(); }
     terminal.innerHTML = '';
     appendLine(`SWITCHING TO ${reg.name.toUpperCase()}...`, 'switch-msg');
     appendLine('', '');
@@ -647,6 +687,18 @@ async function switchModel(id) {
     kvCaches[id]   = createCache(loaded);
     reg._loading = false;
     activeId = id;
+    if (reg.temp !== undefined) { temperature = reg.temp; updateTempDisplay(); }
+
+    // Try to create GPU engine for eligible models
+    if (gpuAvailable && shouldUseGPU(loaded.manifest)) {
+      loadingText.textContent = 'Initialising GPU engine...';
+      gpuEngines[id] = await GPUEngine.create(
+        loaded.manifest, loaded.sec, loaded.api.memory, loaded.base
+      ).catch(e => { console.warn('WebGPU init failed:', e); return null; });
+      console.log('[gpu]', id, gpuEngines[id] ? 'GPU engine ready ⚡' : 'GPU unavailable, falling back to Wasm');
+    } else {
+      gpuEngines[id] = null;
+    }
 
     loadingFill.style.width = '100%';
     loadingText.textContent = 'Ready.';
@@ -723,14 +775,15 @@ async function boot() {
     const prev = activeId;
     modelCache = {};
     kvCaches   = {};
+    gpuEngines = {};
     activeId   = null;  // clear so switchModel doesn't treat it as already-loaded
     appendLine(`KERNEL: switching to ${simdEnabled ? 'SIMD128 ⚡' : 'scalar'} — reloading...`, 'boot');
     if (prev) switchModel(prev);
   });
 
   // Boot message
-  appendLine('GHOST IN THE MACHINE v2.5 (build 16)', 'ready');
-  appendLine(`Kernel: WebAssembly${simdSupported ? ' + SIMD128 ⚡' : ' (scalar)'}`, 'boot');
+  appendLine('GHOST IN THE MACHINE v2.5 (build 18)', 'ready');
+  appendLine(`Kernel: WebAssembly${simdSupported ? ' + SIMD128 ⚡' : ' (scalar)'}${gpuAvailable ? ' · WebGPU available ⚡' : ''}`, 'boot');
   appendLine('Byte-level Tiny Transformer | Multi-model registry', 'boot');
   appendLine('', 'boot');
   appendLine('SELECT MODEL:', 'boot');
@@ -765,6 +818,17 @@ async function boot() {
     kvCaches[defaultModel.id]   = createCache(loaded);
     defaultModel._loading = false;
     activeId = defaultModel.id;
+    if (defaultModel.temp !== undefined) { temperature = defaultModel.temp; updateTempDisplay(); }
+
+    // Try GPU engine for eligible models
+    if (gpuAvailable && shouldUseGPU(loaded.manifest)) {
+      loadingText.textContent = 'Initialising GPU engine...';
+      gpuEngines[defaultModel.id] = await GPUEngine.create(
+        loaded.manifest, loaded.sec, loaded.api.memory, loaded.base
+      ).catch(e => { console.warn('WebGPU init failed:', e); return null; });
+    } else {
+      gpuEngines[defaultModel.id] = null;
+    }
 
     loadingFill.style.width = '100%';
     loadingText.textContent = 'Ready.';
@@ -844,11 +908,18 @@ input.addEventListener('keydown', async (e) => {
   const history = memoryOn ? (histories[activeId] || []) : undefined;
   console.log('[generate] model:', activeId, '| arch:', m?.manifest, '| history turns:', history?.length ?? 0);
 
+  let hitLimit = false;
   try {
     // Larger models on longer contexts can ramble — cap response length per model
-    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 80 : 160);
-    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, kvCaches[activeId], 0, 1.0, history)) {
-      if (step.done) break;
+    const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 120 : 160);
+    const topK   = reg?.top_k  ?? 0;
+    const topP   = reg?.top_p  ?? 1.0;
+    const gpu = gpuEngines[activeId] || undefined;
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : kvCaches[activeId], topK, topP, history, gpu, punctStopOn)) {
+      if (step.done) {
+        hitLimit = step.token !== 257; // 257=EOS = clean stop; PAD/ctx = truncated
+        break;
+      }
 
       // Replace thinking indicator with response on first token
       if (tokenCount === 0) {
@@ -874,10 +945,9 @@ input.addEventListener('keydown', async (e) => {
     appendLine(`ERROR: ${e.message}`, 'error');
   }
 
-  // Graceful ending: trim trailing garbage at the context/EOS limit.
-  // Model EOS prediction is imprecise (~2K training examples), so we
-  // trim back to the last likely sentence boundary or word.
-  if (response && !/[.!?]\s*$/.test(response)) {
+  // Only trim when generation was cut off mid-sentence (hit token/context limit).
+  // When the model fired EOS cleanly, trust its ending.
+  if (hitLimit && response && !/[.!?]\s*$/.test(response)) {
     // Find last sentence boundary: . ! ? followed by space or uppercase (new sentence)
     let best = -1;
     for (const re of [/[.!?] [A-Z]/g, /[.!?][A-Z]/g]) {
@@ -923,6 +993,25 @@ legacyBtn.addEventListener('click', (e) => {
 });
 document.addEventListener('click', (e) => {
   if (!legacyMenu.contains(e.target) && e.target !== legacyBtn) closeLegacyMenu();
+});
+
+// ── Punctuation stop heuristic toggle ────────────────────────────────────
+let punctStopOn = true;
+const punctBadge = document.getElementById('punct-badge');
+function updatePunctBadge() {
+  punctBadge.textContent       = punctStopOn ? '● PSTOP' : '○ PSTOP';
+  punctBadge.style.color       = punctStopOn ? '#33ff33'   : '#33ff3344';
+  punctBadge.style.borderColor = punctStopOn ? '#33ff3388' : '#33ff3322';
+  punctBadge.style.background  = punctStopOn ? '#33ff3311' : 'transparent';
+  punctBadge.title             = punctStopOn
+    ? 'Punct-stop ON — stops on no-space token after punctuation. Click to disable for raw output.'
+    : 'Punct-stop OFF — raw model output. Click to enable.';
+}
+punctBadge.addEventListener('click', () => {
+  punctStopOn = !punctStopOn;
+  updatePunctBadge();
+  appendLine(`PUNCT-STOP: ${punctStopOn ? 'ON' : 'OFF'}`, 'boot');
+  input.focus();
 });
 
 // ── Memory mode toggle ────────────────────────────────────────────────────
