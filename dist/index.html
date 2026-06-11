@@ -886,10 +886,7 @@ input.addEventListener('keydown', async (e) => {
     // Larger models on longer contexts can ramble — cap response length per model
     const maxNew = reg?.max_new ?? (reg?.ctx >= 512 ? 120 : 160);
     const gpu = gpuEngines[activeId] || undefined;
-    // Spectre uses full-recompute path (no KV cache) — KV-cache incremental path
-    // produces degraded output for this deep ternary_modern model.
-    const useCache = activeId !== 'spectre-v1';
-    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : (useCache ? kvCaches[activeId] : undefined), 0, 1.0, history, gpu, punctStopOn)) {
+    for await (const step of generate(activeModel(), query, maxNew, temperature, Math.random, gpu ? undefined : kvCaches[activeId], 0, 1.0, history, gpu, punctStopOn)) {
       if (step.done) {
         hitLimit = step.token !== 257; // 257=EOS = clean stop; PAD/ctx = truncated
         break;
