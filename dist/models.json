@@ -44,9 +44,10 @@
       "primary": true,
       "default": true,
       "max_new": 120,
-      "temp": 0.5,
-      "rep_penalty": 1.2,
-      "top_k": 20
+      "temp": 0.7,
+      "top_k": 40,
+      "top_p": 0.9,
+      "rep_penalty": 1.2
     },
     {
       "id": "wisp-bpe-ternary",
