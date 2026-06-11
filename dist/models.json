@@ -257,6 +257,22 @@
       "top_k": 20
     },
     {
+      "id": "shade-bpe-ternary-modern",
+      "name": "Shade BPE Ternary Modern",
+      "description": "RoPE + RMSNorm + SwiGLU + ternary — 11M params · 20.1MB · best_val 1.479",
+      "bin": "model_shade_bpe_ternary_modern.bin",
+      "json": "model_shade_bpe_ternary_modern.json",
+      "params": "11M",
+      "ctx": 256,
+      "size_mb": 20.1,
+      "available": true,
+      "primary": true,
+      "max_new": 100,
+      "temp": 0.5,
+      "rep_penalty": 1.2,
+      "top_k": 20
+    },
+    {
       "id": "wisp-bpe-ternary-modern",
       "name": "Wisp BPE Ternary Modern",
       "description": "RoPE + RMSNorm + SwiGLU + ternary weights — 7.6M params · 11.6MB · ~900 char context",
