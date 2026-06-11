@@ -207,6 +207,9 @@ export function forward(api, sec, arch, tokens, base, sparseBuffers) {
     const oOff = ba(arch.vocab_size * 2);
     const rope = useRope ? getRoPE(dh, arch.max_len) : null;
     // 1. Embedding
+    // ternary_modern stores raw embeddings (not pre-scaled); Python forward multiplies
+    // by sqrt(d_model) at runtime. Apply the same scale here.
+    const embScale = (arch.arch === 'ternary_modern') ? Math.sqrt(d) : 1.0;
     const teW = f32(S('token_embed'), arch.vocab_size * d);
     const emb = f32(eOff, seq * d);
     if (useRope) {
@@ -214,7 +217,7 @@ export function forward(api, sec, arch, tokens, base, sparseBuffers) {
         for (let p = 0; p < seq; p++) {
             const tid = tokens[p];
             for (let j = 0; j < d; j++)
-                emb[p * d + j] = teW[tid * d + j];
+                emb[p * d + j] = teW[tid * d + j] * embScale;
         }
     }
     else {
@@ -222,7 +225,7 @@ export function forward(api, sec, arch, tokens, base, sparseBuffers) {
         for (let p = 0; p < seq; p++) {
             const tid = tokens[p];
             for (let j = 0; j < d; j++)
-                emb[p * d + j] = teW[tid * d + j] + peW[p * d + j];
+                emb[p * d + j] = teW[tid * d + j] * embScale + peW[p * d + j];
         }
     }
     // Normalisation function — routes to RMSNorm or LayerNorm
@@ -345,17 +348,18 @@ function forwardIncremental(api, sec, arch, token, pos, base, cache, sparseBuffe
         else
             api.layer_norm_f32(x, w, b, d, 1e-5);
     };
-    // 1. Embedding
+    // 1. Embedding (same sqrt(d_model) scale as batch forward)
+    const embScale = (arch.arch === 'ternary_modern') ? Math.sqrt(d) : 1.0;
     const teW = f32(S('token_embed'), arch.vocab_size * d);
     const xVec = f32(xOff, d);
     if (useRope) {
         for (let j = 0; j < d; j++)
-            xVec[j] = teW[token * d + j];
+            xVec[j] = teW[token * d + j] * embScale;
     }
     else {
         const peW = f32(S('pos_embed'), arch.max_len * d);
         for (let j = 0; j < d; j++)
-            xVec[j] = teW[token * d + j] + peW[pos * d + j];
+            xVec[j] = teW[token * d + j] * embScale + peW[pos * d + j];
     }
     // 2. Layers
     for (let li = 0; li < nl; li++) {
@@ -638,4 +642,3 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     }
     yield { char: '', token: _PAD, done: true };
 }
-//# sourceMappingURL=tier2_transformer.js.map
