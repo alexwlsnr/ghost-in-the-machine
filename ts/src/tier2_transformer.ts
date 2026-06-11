@@ -2,13 +2,21 @@
  * Tier 2.5 Ghost Transformer — Float32 Orchestrator (fixed lengths)
  */
 
-interface SectionDef { offset: number; size: number; shape: number[]; dtype: string; scale?: number; scales_offset?: number; scales_size?: number; group_size?: number; }
-interface Arch { vocab_size: number; d_model: number; n_heads: number; n_layers: number; d_ff: number; max_len: number;
+import type { GPUEngine } from './gpu_engine.js';
+import { BPETokenizer } from './bpe_tokenizer.js';
+import type { BPEData } from './bpe_tokenizer.js';
+
+export interface SectionDef { offset: number; size: number; shape: number[]; dtype: string; scale?: number; scales_offset?: number; scales_size?: number; group_size?: number; }
+export interface Arch { vocab_size: number; d_model: number; n_heads: number; n_layers: number; d_ff: number; max_len: number;
   // Modern architecture flags (absent = false / classic)
   arch?: string; use_rope?: boolean; use_swiglu?: boolean; use_rmsnorm?: boolean; }
 
 interface WasmApi {
   memory: WebAssembly.Memory;
+  matmul_ternary(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
+  matmul_ternary_simd(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
+  matmul_ternary_sparse(counts: number, pos: number, neg: number, scale: number, b: number, inp: number, out: number, outD: number): void;
+  ternary_convert_to_sparse(w: number, counts: number, pos: number, neg: number, inD: number, outD: number): void;
   matmul_f32w(w: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   softmax_f32(p: number, n: number): void;
   softmax_causal_f32(p: number, s: number): void;
@@ -72,7 +80,9 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
   const api = wasm.instance.exports as unknown as WasmApi;
   const manifest = JSON.parse(new TextDecoder().decode(jsonBuf)) as {
     architecture: Arch; sections: Record<string, SectionDef>;
+    tokenizer?: BPEData;
   };
+  const bpe = manifest.tokenizer ? new BPETokenizer(manifest.tokenizer) : undefined;
   const sec = manifest.sections;
   const mem = api.memory;
 
@@ -95,7 +105,45 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
   const mem8 = new Uint8Array(mem.buffer);
   const bin8 = new Uint8Array(binBuf);
   mem8.set(bin8, base);
-  return { api, manifest: manifest.architecture, sec, base };
+
+  // Load-time sparse conversion for ternary models.
+  // CRITICAL: sparse buffers must live AFTER the forward-pass scratch area.
+  // The forward() ba() allocator starts at base+binSize and grows upward —
+  // placing sparse buffers there would cause the scratch to overwrite them.
+  // Layout: [model binary][forward scratch margin][sparse index lists]
+  const sparseBuffers = new Map<string, { countsPtr: number; posPtr: number; negPtr: number }>();
+  if (api.ternary_convert_to_sparse) {
+    // Compute worst-case total sparse size so we can grow memory once
+    let totalSparseBytes = 0;
+    for (const s of Object.values(sec) as SectionDef[]) {
+      if (s.dtype !== 'ternary') continue;
+      const [outD, inD] = s.shape;
+      totalSparseBytes += outD * 2 * 4 + outD * inD * 4 + 16; // counts + worst-case pos+neg + align
+    }
+
+    // Sparse area starts after model binary AND forward scratch — no overlap possible
+    let sparseBase = base + binSize + margin;
+    sparseBase = (sparseBase + 15) & ~15;
+
+    const sparseEnd = sparseBase + totalSparseBytes;
+    const curPages2 = mem.buffer.byteLength / 65536;
+    const needPages2 = Math.ceil(sparseEnd / 65536);
+    if (needPages2 > curPages2) mem.grow(needPages2 - curPages2);
+
+    for (const [name, s] of Object.entries(sec) as [string, SectionDef][]) {
+      if (s.dtype !== 'ternary') continue;
+      const [outD, inD] = s.shape;
+      const maxNonZero = outD * inD;
+      const countsPtr = sparseBase;
+      const posPtr    = countsPtr + outD * 2 * 4;
+      const negPtr    = posPtr    + maxNonZero * 2;
+      api.ternary_convert_to_sparse(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
+      sparseBuffers.set(name, { countsPtr, posPtr, negPtr });
+      sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
+    }
+  }
+
+  return { api, manifest: manifest.architecture, sec, base, sparseBuffers, bpe };
 }
 
 export function encode(text: string): number[] {
@@ -110,15 +158,26 @@ export function encode(text: string): number[] {
 // ─── Matmul dispatch ───────────────────────────────────────────────
 // Routes weight matmul to the correct kernel based on section dtype.
 // Biases are always fp32. Head weight stays fp32 (mixed-precision layout).
-function makeMatmulDispatch(api: WasmApi, sec: Record<string, SectionDef>, base: number) {
+function makeMatmulDispatch(
+  api: WasmApi,
+  sec: Record<string, SectionDef>,
+  base: number,
+  sparseBuffers?: Map<string, { countsPtr: number; posPtr: number; negPtr: number }>,
+) {
   const S = (name: string) => base + sec[name].offset;
-  // Use SIMD matmul for fp32 if the SIMD kernel was loaded (it exports matmul_f32w_simd).
-  // Falls back transparently to the scalar matmul_f32w on non-SIMD builds.
-  const fp32mw = (api as any).matmul_f32w_simd ?? api.matmul_f32w;
+  const fp32mw    = (api as any).matmul_f32w_simd ?? api.matmul_f32w;
+  const ternaryMw = (api as any).matmul_ternary_simd ?? api.matmul_ternary;
   return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
     const s = sec[wName];
     const wPtr = S(wName);
-    if (s.dtype === 'int8')          api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+    if (s.dtype === 'ternary') {
+      const sp = sparseBuffers?.get(wName);
+      if (sp && api.matmul_ternary_sparse) {
+        api.matmul_ternary_sparse(sp.countsPtr, sp.posPtr, sp.negPtr, s.scale ?? 1.0, bPtr, inp, out, outD);
+      } else {
+        ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
+      }
+    } else if (s.dtype === 'int8')   api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4')     api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4g')    api.matmul_4bit_grouped(wPtr, base + s.scales_offset!, bPtr, inp, out, inD, outD, s.group_size ?? 32);
     else if (s.dtype === 'bfloat16') api.matmul_bf16(wPtr, bPtr, inp, out, inD, outD);
@@ -162,7 +221,9 @@ function getRoPE(dHead: number, maxLen: number) {
   return ropeCache.get(key)!;
 }
 
-export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
+type SparseMap = Map<string, { countsPtr: number; posPtr: number; negPtr: number }>;
+
+export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number, sparseBuffers?: SparseMap): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
   const useRope    = !!arch.use_rope;
   const useSwiglu  = !!arch.use_swiglu;
@@ -170,7 +231,7 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
 
   // Section pointer helper: actual address = base + manifest offset
   const S = (name: string) => base + sec[name].offset;
-  const mw = makeMatmulDispatch(api, sec, base);
+  const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
 
   let off = base;
   for (const s of Object.values(sec)) {
@@ -325,6 +386,7 @@ function forwardIncremental(
   pos: number,
   base: number,
   cache: KVCache,
+  sparseBuffers?: SparseMap,
 ): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
   const mem = api.memory;
@@ -332,7 +394,7 @@ function forwardIncremental(
   const useSwiglu  = !!arch.use_swiglu;
   const useRmsnorm = !!arch.use_rmsnorm;
   const S = (name: string) => base + sec[name].offset;
-  const mw = makeMatmulDispatch(api, sec, base);
+  const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
   const rope = useRope ? getRoPE(dh, arch.max_len) : null;
 
   let off = base;
@@ -467,11 +529,12 @@ function prefill(
   tokens: number[],
   base: number,
   cache: KVCache,
+  sparseBuffers?: SparseMap,
 ): Float32Array {
   cache.length = 0;
   let logits!: Float32Array;
   for (let p = 0; p < tokens.length; p++) {
-    logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache);
+    logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache, sparseBuffers);
   }
   return logits;
 }
@@ -499,15 +562,18 @@ export function buildContextTokens(
   query: string,
   maxLen: number,
   maxHistory: number = 1,
+  bpe?: BPETokenizer,
 ): number[] {
-  const queryTokens = [...encode(query.toUpperCase()), SEP];
+  const _enc = bpe ? (s: string) => bpe.encode(s) : encode;
+  const _SEP  = bpe ? bpe.SEP : SEP;
+  const queryTokens = [..._enc(query.toUpperCase()), _SEP];
   let tokens = queryTokens;
 
   const recent = history.slice(-maxHistory);
   for (const turn of [...recent].reverse()) {
     const chunk = [
-      ...encode(turn.q.toUpperCase()), SEP,
-      ...encode(turn.r.toUpperCase()), SEP,
+      ..._enc(turn.q.toUpperCase()), _SEP,
+      ..._enc(turn.r.toUpperCase()), _SEP,
     ];
     if (tokens.length + chunk.length >= maxLen) break;
     tokens = [...chunk, ...tokens];
@@ -568,48 +634,98 @@ export async function* generate(
   prompt: string, maxNew = 160, temp = 0.8, rand: () => number = Math.random,
   cache?: KVCache, topK = 0, topP = 1.0,
   history?: Turn[],
+  gpuEngine?: GPUEngine,
+  punctStop = true,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
-  const win = arch.max_len - 1;
-  // Build token sequence — with history if provided, bare query otherwise.
-  const tokens = (history && history.length > 0)
-    ? buildContextTokens(history, prompt, win)
-    : [...encode(prompt.toUpperCase()).slice(0, win - 1), SEP];
+  const bpeT = (model as any).bpe as BPETokenizer | undefined;
 
-  // Repetition penalty: 1.35 for larger models (ctx≥512), 1.15 subtle for small ones
+  // Token-type helpers — byte-level defaults when no BPE tokenizer present
+  const _SEP = bpeT ? bpeT.SEP : SEP;
+  const _EOS = bpeT ? bpeT.EOS : EOS;
+  const _PAD = bpeT ? bpeT.PAD : PAD;
+  const _enc = bpeT ? (s: string) => bpeT.encode(s) : encode;
+  const _dec = bpeT
+    ? (id: number) => bpeT.decodeToken(id)
+    : (id: number) => (id < 256 && id !== SEP) ? String.fromCharCode(id) : '';
+
+  const win = arch.max_len - 1;
+  const tokens = (history && history.length > 0)
+    ? buildContextTokens(history, prompt, win, 1, bpeT)
+    : [..._enc(prompt.toUpperCase()).slice(0, win - 1), _SEP];
+
   const repPenalty = arch.max_len >= 512 ? 1.35 : 1.15;
   const REP_WINDOW = 32;
   const generated: number[] = [];
 
-  // -- Cached path ----------------------------------------------------
-  if (cache !== undefined) {
-    cache.length = 0;
-    let logits = prefill(api, sec, arch, tokens, base, cache);
+  // Heuristic: stop when a no-leading-space token follows end-punctuation.
+  // Catches overrun like "OATMEAL!HA!" where the model drifts past EOS.
+  // Only active for BPE models (byte-level models have no leading-space concept).
+  const PUNCT_END = /[.!?]$/;
+  let lastDecoded = '';
+  function punctStopCheck(nextId: number): boolean {
+    if (!punctStop || !bpeT) return false;
+    const piece = _dec(nextId);
+    const stop = PUNCT_END.test(lastDecoded) && piece.length > 0 && piece[0] !== ' ';
+    return stop;
+  }
+  function emitAndTrack(nextId: number): string {
+    const piece = _dec(nextId);
+    if (piece) lastDecoded = piece;
+    return piece;
+  }
+
+  // -- GPU path -------------------------------------------------------
+  if (gpuEngine !== undefined) {
+    gpuEngine.reset();
+    let logits = await gpuEngine.prefill(tokens);
     for (let s = 0; s < maxNew; s++) {
-      if (cache.length >= win) { yield { char: '', token: PAD, done: true }; return; }
+      if (gpuEngine.seqLen >= win) { yield { char: '', token: _PAD, done: true }; return; }
       await new Promise((r) => setTimeout(r, 0));
       const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                      repPenalty, generated.slice(-REP_WINDOW));
-      if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+      if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
+      if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
       generated.push(next);
-      yield { char: (next < 256 && next !== SEP) ? String.fromCharCode(next) : '', token: next, done: false };
-      logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
+      yield { char: emitAndTrack(next), token: next, done: false };
+      logits = await gpuEngine.step(next);
     }
-    yield { char: '', token: PAD, done: true };
+    yield { char: '', token: _PAD, done: true };
+    return;
+  }
+
+  // -- Cached path ----------------------------------------------------
+  if (cache !== undefined) {
+    cache.length = 0;
+    const sp = (model as any).sparseBuffers as SparseMap | undefined;
+    let logits = prefill(api, sec, arch, tokens, base, cache, sp);
+    for (let s = 0; s < maxNew; s++) {
+      if (cache.length >= win) { yield { char: '', token: _PAD, done: true }; return; }
+      await new Promise((r) => setTimeout(r, 0));
+      const next = sampleFromLogits(logits, temp, topK, topP, rand,
+                                     repPenalty, generated.slice(-REP_WINDOW));
+      if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
+      if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
+      generated.push(next);
+      yield { char: emitAndTrack(next), token: next, done: false };
+      logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
+    }
+    yield { char: '', token: _PAD, done: true };
     return;
   }
 
   // -- Full-recompute path (no cache — backward compatible) -----------
   for (let s = 0; s < maxNew; s++) {
-    if (tokens.length >= win) { yield { char: '', token: PAD, done: true }; return; }
+    if (tokens.length >= win) { yield { char: '', token: _PAD, done: true }; return; }
     await new Promise((r) => setTimeout(r, 0));
     const logits = forward(api, sec, arch, tokens, base);
     const next = sampleFromLogits(logits, temp, topK, topP, rand,
                                    repPenalty, generated.slice(-REP_WINDOW));
-    if (next === EOS || next === PAD) { yield { char: '', token: next, done: true }; return; }
+    if (next === _EOS || next === _PAD || next === _SEP) { yield { char: '', token: next, done: true }; return; }
+    if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
     generated.push(next);
     tokens.push(next);
-    yield { char: next < 256 ? String.fromCharCode(next) : '', token: next, done: false };
+    yield { char: emitAndTrack(next), token: next, done: false };
   }
-  yield { char: '', token: PAD, done: true };
+  yield { char: '', token: _PAD, done: true };
 }

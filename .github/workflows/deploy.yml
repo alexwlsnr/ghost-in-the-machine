@@ -13,45 +13,78 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # needed for changed-files check
 
+      # ── Detect what actually changed ──────────────────────────────────
+      - name: Check changed sources
+        id: changes
+        run: |
+          WASM_CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | grep -c "^wasm/" || true)
+          TS_CHANGED=$(git diff HEAD~1 --name-only 2>/dev/null | grep -c "^ts/src/" || true)
+          echo "wasm=$([[ $WASM_CHANGED -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "ts=$([[ $TS_CHANGED -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "Wasm changed: $WASM_CHANGED  TS changed: $TS_CHANGED"
+
+      # ── Rust / Wasm (only if wasm/src changed) ────────────────────────
       - name: Install Rust toolchain
+        if: steps.changes.outputs.wasm == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache Cargo registry + build artifacts
+        if: steps.changes.outputs.wasm == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: wasm
+
       - name: Build Wasm kernel (scalar)
+        if: steps.changes.outputs.wasm == 'true'
         working-directory: wasm
         run: cargo build --target wasm32-unknown-unknown --release
 
       - name: Build Wasm kernel (SIMD)
+        if: steps.changes.outputs.wasm == 'true'
         working-directory: wasm
         run: RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release
 
       - name: Copy Wasm kernels to dist
+        if: steps.changes.outputs.wasm == 'true'
         run: |
           cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel.wasm
           cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel_simd.wasm
 
+      # ── TypeScript (only if ts/src changed) ───────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ts/package.json
 
       - name: Install & build TypeScript
+        if: steps.changes.outputs.ts == 'true'
         working-directory: ts
         run: |
           npm install
-          npx tsc -p tsconfig.transformer.json
+          npx tsc -p tsconfig.json
 
       - name: Copy TS output to dist
-        run: cp ts/dist/tier2_transformer.js dist/
+        if: steps.changes.outputs.ts == 'true'
+        run: |
+          cp ts/dist/tier2_transformer.js dist/
+          cp ts/dist/gpu_engine.js dist/
+          cp ts/dist/bpe_tokenizer.js dist/
+
+      # ── Always: install node deps for tests, verify, deploy ───────────
+      - name: Install node deps (for tests)
+        working-directory: ts
+        run: npm install
 
       - name: Verify dist contents
         run: ls -lh dist/
 
-      # Regression net: kernel ops, end-to-end logits parity vs the committed
-      # PyTorch reference, and generation goldens. Runs against the just-built
-      # wasm/ts + the committed bundle, so a broken deploy is blocked here.
       - name: Run tests
         run: node --test test/*.test.js
 

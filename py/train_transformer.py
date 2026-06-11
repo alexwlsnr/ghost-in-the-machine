@@ -418,10 +418,290 @@ class TinyTransformerModern(nn.Module):
         return self.head(h)
 
 
+# ─── Ternary architecture ───────────────────────────────────────────
+
+class TernaryLinear(nn.Module):
+    """Linear layer that pushes weights toward {-scale, 0, +scale} via STE.
+
+    Forward pass: weights are ternarized using absmean thresholding.
+    Backward pass: gradients flow through the continuous fp32 weights
+    (straight-through estimator) so the optimizer can move them.
+
+    Scale = absmean(weight). Threshold = 0.5 * scale.
+    Values with |w| < threshold collapse to 0; others become ±scale.
+    """
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+        super().__init__()
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.bias   = nn.Parameter(torch.zeros(out_features)) if bias else None
+        nn.init.normal_(self.weight, std=0.02)
+
+    def ternarize(self, w: torch.Tensor) -> torch.Tensor:
+        scale     = w.abs().mean().clamp(min=1e-8)
+        threshold = 0.5 * scale
+        return scale * torch.where(w.abs() < threshold,
+                                   torch.zeros_like(w),
+                                   torch.sign(w))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # STE: use ternary values in forward, let gradient pass through fp32 weight
+        w_t = self.weight + (self.ternarize(self.weight) - self.weight).detach()
+        return F.linear(x, w_t, self.bias)
+
+
+class _TernaryAttention(nn.Module):
+    """Multi-head causal self-attention with ternary Q/K/V/O projections."""
+
+    def __init__(self, d_model: int, n_heads: int):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.n_heads = n_heads
+        self.d_head  = d_model // n_heads
+        self.q_proj  = TernaryLinear(d_model, d_model)
+        self.k_proj  = TernaryLinear(d_model, d_model)
+        self.v_proj  = TernaryLinear(d_model, d_model)
+        self.o_proj  = TernaryLinear(d_model, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, d = x.shape
+        q = self.q_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        k = self.k_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        v = self.v_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
+        scale  = math.sqrt(self.d_head)
+        scores = (q @ k.transpose(-2, -1)) / scale
+        mask   = torch.triu(torch.ones(T, T, device=x.device, dtype=torch.bool), diagonal=1)
+        scores = scores.masked_fill(mask, float('-inf'))
+        attn   = F.softmax(scores, dim=-1)
+        out    = (attn @ v).transpose(1, 2).contiguous().view(B, T, d)
+        return self.o_proj(out)
+
+
+class _TernaryFFN(nn.Module):
+    """Position-wise FFN: TernaryLinear → ReLU → TernaryLinear."""
+
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = TernaryLinear(d_model, d_ff)
+        self.w2 = TernaryLinear(d_ff, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(F.relu(self.w1(x)))
+
+
+class _TernaryBlock(nn.Module):
+    """Pre-norm transformer block with ternary attention and FFN."""
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(d_model)
+        self.attn  = _TernaryAttention(d_model, n_heads)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.ff    = _TernaryFFN(d_model, d_ff)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x))
+        x = x + self.ff(self.norm2(x))
+        return x
+
+
+class TinyTransformerTernary(nn.Module):
+    """Wisp-scale causal transformer with ternary linear weights.
+
+    Same structure as TinyTransformer (classic) but all attention and FFN
+    projections use TernaryLinear with straight-through estimator training.
+    Embeddings, layer norms, and biases remain fp32.
+
+    Intended for fast experimentation on a secondary GPU before committing
+    to full Revenant (300M) training.
+    """
+
+    arch = 'ternary'
+
+    def __init__(self, vocab_size: int, d_model: int, n_heads: int,
+                 n_layers: int, d_ff: int, max_len: int):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model    = d_model
+        self.n_heads    = n_heads
+        self.n_layers   = n_layers
+        self.d_ff       = d_ff
+        self.max_len    = max_len
+
+        self.token_embed = nn.Embedding(vocab_size, d_model)
+        self.pos_embed   = nn.Embedding(max_len, d_model)
+        self.blocks      = nn.ModuleList([
+            _TernaryBlock(d_model, n_heads, d_ff) for _ in range(n_layers)
+        ])
+        self.ln_final = nn.LayerNorm(d_model)
+        self.head     = nn.Linear(d_model, vocab_size, bias=False)
+        self.head.weight = self.token_embed.weight  # weight tying
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.token_embed.weight, std=0.02)
+
+    def compute_quantization_loss(self, weight_bits: int = 4) -> torch.Tensor:
+        # STE handles ternarization natively — no extra QAT penalty needed
+        return torch.tensor(0.0, device=next(self.parameters()).device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        pos = torch.arange(T, device=x.device).unsqueeze(0)
+        h   = self.token_embed(x) + self.pos_embed(pos)
+        for block in self.blocks:
+            h = block(h)
+        h = self.ln_final(h)
+        return self.head(h)
+
+
+# ─── Modern ternary building blocks ─────────────────────────────────
+
+class _TernaryAttentionRoPE(nn.Module):
+    """Ternary Q/K/V/O attention with RoPE and SDPA."""
+
+    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.n_heads = n_heads
+        self.d_head  = d_model // n_heads
+        self.dropout = dropout
+        self.q_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.k_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.v_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.o_proj  = TernaryLinear(d_model, d_model, bias=False)
+
+    def forward(self, x: torch.Tensor,
+                freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
+        B, T, C = x.shape
+        q = self.q_proj(x).view(B, T, self.n_heads, self.d_head)
+        k = self.k_proj(x).view(B, T, self.n_heads, self.d_head)
+        v = self.v_proj(x).view(B, T, self.n_heads, self.d_head)
+        if freqs_cis is not None:
+            q, k = apply_rotary_emb(q, k, freqs_cis[:T])
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        dp = self.dropout if self.training else 0.0
+        out = F.scaled_dot_product_attention(q, k, v, dropout_p=dp, is_causal=True)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        return self.o_proj(out)
+
+
+class _TernarySwiGLUFFN(nn.Module):
+    """SwiGLU FFN with all-ternary projections."""
+
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = TernaryLinear(d_model, d_ff, bias=False)  # gate
+        self.w2 = TernaryLinear(d_model, d_ff, bias=False)  # value
+        self.w3 = TernaryLinear(d_ff, d_model, bias=False)  # output
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w3(F.silu(self.w1(x)) * self.w2(x))
+
+
+class _TernaryReLU2FFN(nn.Module):
+    """Squared-ReLU FFN with ternary projections.
+
+    relu(x)^2 outperforms SwiGLU under ternary weights per BitNet b1.58
+    ablation — the gating mechanism in SwiGLU interacts poorly with ternary
+    sparsity. Uses 2 matrices vs SwiGLU's 3, slightly fewer params.
+    """
+
+    def __init__(self, d_model: int, d_ff: int):
+        super().__init__()
+        self.w1 = TernaryLinear(d_model, d_ff, bias=False)
+        self.w2 = TernaryLinear(d_ff, d_model, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(F.relu(self.w1(x)) ** 2)
+
+
+class _TernaryModernBlock(nn.Module):
+    """Pre-norm block: RMSNorm + ternary RoPE attention + ternary FFN."""
+
+    def __init__(self, d_model: int, n_heads: int, d_ff: int,
+                 ffn_type: str = 'swiglu', dropout: float = 0.1):
+        super().__init__()
+        self.norm1 = RMSNorm(d_model)
+        self.attn  = _TernaryAttentionRoPE(d_model, n_heads, dropout=dropout)
+        self.norm2 = RMSNorm(d_model)
+        self.ff    = (_TernaryReLU2FFN(d_model, d_ff) if ffn_type == 'relu2'
+                      else _TernarySwiGLUFFN(d_model, d_ff))
+
+    def forward(self, x: torch.Tensor,
+                freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
+        x = x + self.attn(self.norm1(x), freqs_cis)
+        x = x + self.ff(self.norm2(x))
+        return x
+
+
+class TinyTransformerTernaryModern(nn.Module):
+    """Ternary transformer with modern components: RMSNorm + RoPE + SwiGLU or ReLU².
+
+    Combines the ternary weight quantisation of TinyTransformerTernary with
+    the architectural improvements of TinyTransformerModern. Intended as the
+    architecture for Spectre and future large ternary models.
+
+    ffn_type='swiglu' (default): SwiGLU gated FFN, 3 ternary matrices per block.
+    ffn_type='relu2':            Squared-ReLU FFN, 2 ternary matrices per block.
+                                 BitNet b1.58 ablation favours relu2 for ternary.
+    """
+
+    arch = 'ternary_modern'
+
+    def __init__(self, vocab_size: int, d_model: int, n_heads: int,
+                 n_layers: int, d_ff: int, max_len: int,
+                 ffn_type: str = 'swiglu', dropout: float = 0.1):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.d_model    = d_model
+        self.n_heads    = n_heads
+        self.n_layers   = n_layers
+        self.d_ff       = d_ff
+        self.max_len    = max_len
+        self.ffn_type   = ffn_type
+
+        self.token_embed = nn.Embedding(vocab_size, d_model)
+        self.register_buffer(
+            'freqs_cis',
+            precompute_freqs_cis(d_model // n_heads, max_len),
+            persistent=False,
+        )
+        self.blocks = nn.ModuleList([
+            _TernaryModernBlock(d_model, n_heads, d_ff,
+                                ffn_type=ffn_type, dropout=dropout)
+            for _ in range(n_layers)
+        ])
+        self.ln_final = RMSNorm(d_model)
+        self.head = nn.Linear(d_model, vocab_size, bias=False)
+        self.head.weight = self.token_embed.weight  # weight tying
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.token_embed.weight, std=0.02)
+
+    def compute_quantization_loss(self, weight_bits: int = 4) -> torch.Tensor:
+        return torch.tensor(0.0, device=next(self.parameters()).device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T = x.shape
+        h = self.token_embed(x) * math.sqrt(self.d_model)
+        freqs = self.freqs_cis[:T]
+        for block in self.blocks:
+            h = block(h, freqs)
+        h = self.ln_final(h)
+        return self.head(h)
+
+
 # ─── Sequence builders ──────────────────────────────────────────────
 
 def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
-                  truncate: bool = False, mask_query: bool = False) -> Tuple[List[int], List[int]]:
+                  truncate: bool = False, mask_query: bool = False,
+                  tok=None) -> Tuple[List[int], List[int]]:
     """Create input/target pair for autoregressive training.
 
     Layout: [Q bytes] [SEP] [R bytes] [EOS]
@@ -438,28 +718,28 @@ def make_sequence(query: str, response: str, max_len: int = DEFAULT_MAX_LEN,
       preventing the doubled-response issue. Use for Wisp (ctx=64) where
       strict filtering would discard 97% of diverse training data.
     """
-    q_bytes = encode(query)
-    r_bytes = encode(response)
+    if tok is not None:
+        q_bytes = tok.encode(query)
+        r_bytes = tok.encode(response)
+        _PAD, _EOS, _SEP = tok.PAD, tok.EOS, tok.SEP
+    else:
+        q_bytes = encode(query)
+        r_bytes = encode(response)
+        _PAD, _EOS, _SEP = PAD_TOKEN, EOS_TOKEN, SEP_TOKEN
 
-    full = q_bytes + [SEP_TOKEN] + r_bytes
+    full = q_bytes + [_SEP] + r_bytes
     if len(full) + 1 > max_len:
         if not truncate:
-            return [], []          # signal caller to drop
-        full = full[:max_len - 1]  # truncate R, EOS will follow
+            return [], []
+        full = full[:max_len - 1]
 
-    # Input: Q + SEP + R + EOS
-    inp = full + [EOS_TOKEN]
-
-    # Target: predict next token (shifted left), EOS marks end, PAD fills remainder
-    tgt = full[1:] + [EOS_TOKEN, PAD_TOKEN]
+    inp = full + [_EOS]
+    tgt = full[1:] + [_EOS, _PAD]
     tgt = tgt[:len(inp)]
 
-    # Response loss masking: replace query positions with PAD so loss is only
-    # computed on response tokens. The position at index len(q_bytes) predicts
-    # the first response byte (given Q+SEP context) — keep that.
     if mask_query:
-        for i in range(len(q_bytes)):
-            tgt[i] = PAD_TOKEN
+        for i in range(min(len(q_bytes), len(tgt))):
+            tgt[i] = _PAD
 
     return inp, tgt
 
@@ -483,7 +763,7 @@ def split_pairs(pairs, val_frac: float, seed: int = 0):
 
 
 def _build_sequences(pairs, max_len: int, preserve_case: bool = False,
-                     truncate: bool = False, mask_query: bool = False):
+                     truncate: bool = False, mask_query: bool = False, tok=None):
     """Tokenize pairs into (inputs, targets), dropping empty / too-short ones.
 
     Accepts either single-turn (q, r) tuples or multi-turn [(q1,r1),(q2,r2),...]
@@ -501,9 +781,9 @@ def _build_sequences(pairs, max_len: int, preserve_case: bool = False,
             turns = [(q.strip(), r.strip()) for q, r in turns]
         if len(turns) == 1:
             inp, tgt = make_sequence(turns[0][0], turns[0][1], max_len,
-                                     truncate=truncate, mask_query=mask_query)
+                                     truncate=truncate, mask_query=mask_query, tok=tok)
         else:
-            inp, tgt = make_sequence_multiturn(turns, max_len, mask_query=mask_query)
+            inp, tgt = make_sequence_multiturn(turns, max_len, mask_query=mask_query, tok=tok)
         if len(inp) >= 4:
             inputs.append(inp)
             targets.append(tgt)
@@ -531,6 +811,7 @@ def make_sequence_multiturn(
     turns: List[Tuple[str, str]],
     max_len: int = DEFAULT_MAX_LEN,
     mask_query: bool = False,
+    tok=None,
 ) -> Tuple[List[int], List[int]]:
     """Build an autoregressive sequence from a list of (query, response) pairs.
 
@@ -542,31 +823,33 @@ def make_sequence_multiturn(
     mask_query: if True, query byte positions in the target are set to PAD_TOKEN
       so the loss is only computed on response tokens.
     """
+    _PAD = tok.PAD if tok else PAD_TOKEN
+    _EOS = tok.EOS if tok else EOS_TOKEN
+    _SEP = tok.SEP if tok else SEP_TOKEN
+    _enc = tok.encode if tok else encode
+
     tokens: List[int] = []
-    # Track which positions are query bytes (for masking)
     is_query_pos: List[bool] = []
     for q, r in turns:
-        q_bytes = encode(q)
-        r_bytes = encode(r)
-        tokens += q_bytes + [SEP_TOKEN] + r_bytes + [SEP_TOKEN]
+        q_bytes = _enc(q)
+        r_bytes = _enc(r)
+        tokens += q_bytes + [_SEP] + r_bytes + [_SEP]
         is_query_pos += [True] * len(q_bytes) + [False] * (1 + len(r_bytes) + 1)
 
-    # Replace trailing SEP with EOS
     if not tokens:
         return [], []
-    tokens[-1] = EOS_TOKEN
+    tokens[-1] = _EOS
 
     if len(tokens) > max_len:
         return [], []
 
     inp = tokens
-    tgt = tokens[1:] + [PAD_TOKEN]
+    tgt = tokens[1:] + [_PAD]
 
     if mask_query:
-        # tgt[i] predicts inp[i+1]; mask position i when inp[i] is a query byte
         for i in range(len(tgt)):
             if i < len(is_query_pos) and is_query_pos[i]:
-                tgt[i] = PAD_TOKEN
+                tgt[i] = _PAD
 
     return inp, tgt
 
@@ -596,6 +879,8 @@ def train_transformer(
     preserve_case: bool = False,
     truncate: bool = False,
     mask_query: bool = False,
+    tok=None,
+    resume_best_val_loss=None,
 ):
     """Returns a dict: {model, epochs_run, best_val_loss, stopped_early}."""
     # Lazy-import supervision emitter — no hard dep when not used.
@@ -622,9 +907,11 @@ def train_transformer(
     model = model.to(device)
     model.train()
 
+    pad_id = tok.PAD if tok else PAD_TOKEN
+
     train_pairs, val_pairs = split_pairs(pairs, val_frac)
-    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate, mask_query)
-    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate, mask_query)
+    all_inputs, all_targets = _build_sequences(train_pairs, model.max_len, preserve_case, truncate, mask_query, tok)
+    val_inputs, val_targets = _build_sequences(val_pairs, model.max_len, preserve_case, truncate, mask_query, tok)
 
     print(f"Sequences — train: {len(all_inputs)}, val: {len(val_inputs)}")
     total_params = sum(p.numel() for p in model.parameters())
@@ -643,7 +930,7 @@ def train_transformer(
 
     train_start = time.time()
     best_acc = 0.0
-    best_val_loss = float('inf')
+    best_val_loss = resume_best_val_loss if resume_best_val_loss is not None else float('inf')
     best_epoch = 0
     no_improve = 0
     step = 0
@@ -667,8 +954,8 @@ def train_transformer(
             padded_y = []
             for inp, tgt in zip(batch_inputs, batch_targets):
                 pad_n = max_blen - len(inp)
-                padded_x.append(inp + [PAD_TOKEN] * pad_n)
-                padded_y.append(tgt + [PAD_TOKEN] * pad_n)
+                padded_x.append(inp + [pad_id] * pad_n)
+                padded_y.append(tgt + [pad_id] * pad_n)
 
             x = torch.tensor(padded_x, dtype=torch.long, device=device)
             y = torch.tensor(padded_y, dtype=torch.long, device=device)
@@ -680,7 +967,7 @@ def train_transformer(
                 loss = F.cross_entropy(
                     logits.reshape(-1, model.vocab_size),
                     y.reshape(-1),
-                    ignore_index=PAD_TOKEN,
+                    ignore_index=pad_id,
                 )
 
             # Quantization-aware penalty is expensive (per-tensor quantile), so
@@ -696,7 +983,7 @@ def train_transformer(
 
             total_loss += loss.item()
             pred_tokens = logits.argmax(dim=-1)
-            mask = y != PAD_TOKEN
+            mask = y != pad_id
             total_correct += (pred_tokens[mask] == y[mask]).sum().item()
             total_tokens += mask.sum().item()
             n_batches += 1
@@ -716,9 +1003,9 @@ def train_transformer(
             with torch.no_grad():
                 for batch_idxs in make_batches(list(range(len(val_inputs))), batch_size):
                     max_blen = max(len(val_inputs[i]) for i in batch_idxs)
-                    px = [val_inputs[i] + [PAD_TOKEN] * (max_blen - len(val_inputs[i]))
+                    px = [val_inputs[i] + [pad_id] * (max_blen - len(val_inputs[i]))
                           for i in batch_idxs]
-                    py = [val_targets[i] + [PAD_TOKEN] * (max_blen - len(val_targets[i]))
+                    py = [val_targets[i] + [pad_id] * (max_blen - len(val_targets[i]))
                           for i in batch_idxs]
                     x = torch.tensor(px, dtype=torch.long, device=device)
                     y = torch.tensor(py, dtype=torch.long, device=device)
@@ -726,7 +1013,7 @@ def train_transformer(
                     val_total += F.cross_entropy(
                         logits.reshape(-1, model.vocab_size),
                         y.reshape(-1),
-                        ignore_index=PAD_TOKEN,
+                        ignore_index=pad_id,
                     ).item()
                     val_batches += 1
             val_loss = val_total / max(val_batches, 1)
@@ -753,7 +1040,10 @@ def train_transformer(
                 'model_state': model.state_dict(),
                 'architecture': {
                     'type': 'tiny_transformer',
-                    'arch': 'modern' if isinstance(model, TinyTransformerModern) else 'classic',
+                    'arch': ('ternary_modern' if isinstance(model, TinyTransformerTernaryModern)
+                             else 'ternary' if isinstance(model, TinyTransformerTernary)
+                             else 'modern' if isinstance(model, TinyTransformerModern)
+                             else 'classic'),
                     # Save individual modern flags so loaders don't need to infer from state dict
                     **({'use_rope':     model.use_rope,
                         'use_swiglu':   any(hasattr(b.ff, 'w1') for b in model.blocks),
@@ -766,7 +1056,11 @@ def train_transformer(
                     'n_layers': model.n_layers,
                     'd_ff': model.d_ff,
                     'max_len': model.max_len,
+                    **(({'ffn_type': model.ffn_type}
+                        if isinstance(model, TinyTransformerTernaryModern) else {})),
                     'weight_bits': 4,
+                    **(({'tokenizer_file': checkpoint_file.replace('.pt', '_tokenizer.json'),
+                         'tokenizer_type': 'bpe'}) if tok else {}),
                 },
                 'best_acc': best_acc,
                 'best_val_loss': best_val_loss if val_inputs else None,
@@ -825,17 +1119,25 @@ def generate(
     temperature: float = 0.8,
     device: str = 'cpu',
     preserve_case: bool = False,
+    tok=None,
 ) -> str:
     model.eval()
     model = model.to(device)
 
-    # Cap the prompt at the context window (mirrors the TS orchestrator). The old
-    # `[:max_len - max_new]` silently dropped prompt bytes (e.g. "HELLO" → "HELL").
     prompt_norm = prompt if preserve_case else prompt.upper()
-    # Inject SEP after the prompt — this puts the model in "response zone"
-    # so it generates R directly rather than potentially emitting SEP first.
-    tokens = encode(prompt_norm)[:model.max_len - 2] + [SEP_TOKEN]
+
+    if tok is not None:
+        _enc  = tok.encode
+        _dec  = tok.decode
+        _SEP, _EOS, _PAD = tok.SEP, tok.EOS, tok.PAD
+    else:
+        _enc  = encode
+        _dec  = decode
+        _SEP, _EOS, _PAD = SEP_TOKEN, EOS_TOKEN, PAD_TOKEN
+
+    tokens = _enc(prompt_norm)[:model.max_len - 2] + [_SEP]
     prompt_len = len(tokens)
+    generated = []
 
     for _ in range(max_new):
         x = torch.tensor([tokens], dtype=torch.long, device=device)
@@ -844,19 +1146,14 @@ def generate(
         probs = F.softmax(next_logits, dim=-1)
         next_token = torch.multinomial(probs, 1).item()
 
-        if next_token == EOS_TOKEN or next_token == PAD_TOKEN:
+        if next_token in (_EOS, _PAD, _SEP):
             break
-        # Skip any SEP token the model emits (shouldn't happen with injected SEP,
-        # but guard against it so it never appears in output.)
-        if next_token != SEP_TOKEN:
-            tokens.append(next_token)
+        generated.append(next_token)
+        tokens.append(next_token)
         if len(tokens) >= model.max_len:
             break
 
-    # Return only the generated portion (after the prompt tokens we kept).
-    # decode() already filters SEP (byte 1) since it only outputs b < 256 that
-    # are printable; SEP_TOKEN=1 is a control char that bytes().decode replaces.
-    return decode(tokens[prompt_len:])
+    return _dec(generated)
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────
@@ -894,8 +1191,12 @@ if __name__ == '__main__':
                         help='disable uppercase normalization (required for Wraith/technical models)')
     parser.add_argument('--truncate', action='store_true',
                         help='truncate over-length pairs instead of dropping them (use for small ctx like Wisp)')
-    parser.add_argument('--arch', default='classic', choices=['classic', 'modern'],
+    parser.add_argument('--arch', default='classic', choices=['classic', 'modern', 'ternary', 'ternary_modern'],
                         help='classic = original TinyTransformer; modern = RMSNorm+SwiGLU+RoPE+weight-tying')
+    parser.add_argument('--ffn-type', default='swiglu', choices=['swiglu', 'relu2'],
+                        help='FFN for ternary_modern: swiglu (default) or relu2 (BitNet-recommended for ternary)')
+    parser.add_argument('--tokenizer', type=str, default=None,
+                        help='path to BPE tokenizer JSON (from train_bpe.py); omit for byte-level')
     parser.add_argument('--mask-query-loss', action='store_true',
                         help='only compute loss on response tokens (masks query positions)')
     # Fine-grained modern arch overrides (only apply when --arch modern)
@@ -909,6 +1210,19 @@ if __name__ == '__main__':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     else:
         device = args.device
+
+    # BPE tokenizer (optional — byte-level used when absent)
+    tok = None
+    if args.tokenizer:
+        import importlib.util, sys as _sys
+        _spec = importlib.util.spec_from_file_location(
+            'bpe_tokenizer',
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bpe_tokenizer.py'),
+        )
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        tok = _mod.BPETokenizer(args.tokenizer)
+        print(f"BPE tokenizer loaded: {tok.vocab_size} tokens from {args.tokenizer}")
 
     # Load training data — supports both single-turn (Q|R) and multi-turn (Q1|R1|Q2|R2|...) lines.
     pairs = []
@@ -930,24 +1244,67 @@ if __name__ == '__main__':
     # Create or resume model
     if args.resume and __import__('os').path.exists(args.resume):
         print(f"Resuming from {args.resume}")
-        ckpt = torch.load(args.resume, map_location=device, weights_only=True)
+        ckpt = torch.load(args.resume, map_location=device, weights_only=False)
         arch = ckpt['architecture']
-        model = TinyTransformer(
-            vocab_size=arch['vocab_size'],
-            d_model=arch['d_model'],
-            n_heads=arch['n_heads'],
-            n_layers=arch['n_layers'],
-            d_ff=arch['d_ff'],
-            max_len=arch['max_len'],
-        )
+        _kw = dict(vocab_size=arch['vocab_size'], d_model=arch['d_model'],
+                   n_heads=arch['n_heads'], n_layers=arch['n_layers'],
+                   d_ff=arch['d_ff'], max_len=arch['max_len'])
+        if arch.get('arch') == 'ternary_modern':
+            model = TinyTransformerTernaryModern(**_kw,
+                ffn_type=arch.get('ffn_type', 'swiglu'))
+        elif arch.get('arch') == 'ternary':
+            model = TinyTransformerTernary(**_kw)
+        elif arch.get('arch') == 'modern':
+            state = ckpt['model_state']
+            model = TinyTransformerModern(**_kw,
+                use_rope='pos_embed.weight' not in state,
+                use_swiglu=any('ff.w1' in k for k in state),
+                use_rmsnorm=not any('norm1.bias' in k for k in state),
+                tie_weights='head.weight' not in state)
+        else:
+            model = TinyTransformer(**_kw)
         model.load_state_dict(ckpt['model_state'])
-        start_epoch = ckpt.get('epoch', 0)
+        # Fine-tune detection: resume path differs from output checkpoint path.
+        # In that case the source checkpoint's epoch/best_val_loss belong to a
+        # different run — reset so this run counts its own epochs from 0.
+        is_finetune = args.checkpoint and (
+            __import__('os').path.realpath(args.resume) !=
+            __import__('os').path.realpath(args.checkpoint)
+        )
+        if is_finetune:
+            start_epoch = 0
+            _resume_best_val_loss = None
+            print(f"Fine-tune mode (source != output): starting from epoch 0, {args.epochs} epochs")
+        else:
+            start_epoch = ckpt.get('epoch', 0)
+            _resume_best_val_loss = ckpt.get('best_val_loss', None)
+            remaining = max(1, args.epochs - start_epoch)
+            print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
         remaining = max(1, args.epochs - start_epoch)
-        print(f"Resuming from epoch {start_epoch}, {remaining} epochs remaining")
     else:
-        if args.arch == 'modern':
+        vocab_sz = tok.vocab_size if tok else VOCAB_SIZE
+        if args.arch == 'ternary_modern':
+            model = TinyTransformerTernaryModern(
+                vocab_size=vocab_sz,
+                d_model=args.d_model,
+                n_heads=args.n_heads,
+                n_layers=args.n_layers,
+                d_ff=args.d_ff,
+                max_len=args.max_len,
+                ffn_type=args.ffn_type,
+            )
+        elif args.arch == 'ternary':
+            model = TinyTransformerTernary(
+                vocab_size=vocab_sz,
+                d_model=args.d_model,
+                n_heads=args.n_heads,
+                n_layers=args.n_layers,
+                d_ff=args.d_ff,
+                max_len=args.max_len,
+            )
+        elif args.arch == 'modern':
             model = TinyTransformerModern(
-                vocab_size=VOCAB_SIZE,
+                vocab_size=vocab_sz,
                 d_model=args.d_model,
                 n_heads=args.n_heads,
                 n_layers=args.n_layers,
@@ -960,7 +1317,7 @@ if __name__ == '__main__':
             )
         else:
             model = TinyTransformer(
-                vocab_size=VOCAB_SIZE,
+                vocab_size=vocab_sz,
                 d_model=args.d_model,
                 n_heads=args.n_heads,
                 n_layers=args.n_layers,
@@ -968,6 +1325,14 @@ if __name__ == '__main__':
                 max_len=args.max_len,
             )
         remaining = args.epochs
+
+    # Copy tokenizer JSON next to checkpoint so serialize.py can find it
+    if tok and args.tokenizer:
+        import shutil
+        tok_dest = args.checkpoint.replace('.pt', '_tokenizer.json')
+        if os.path.abspath(args.tokenizer) != os.path.abspath(tok_dest):
+            shutil.copy(args.tokenizer, tok_dest)
+            print(f"Tokenizer copied to {tok_dest}")
 
     result = train_transformer(
         model, pairs, epochs=remaining, lr=args.lr,
@@ -979,11 +1344,14 @@ if __name__ == '__main__':
         preserve_case=args.preserve_case,
         truncate=args.truncate,
         mask_query=args.mask_query_loss,
+        tok=tok,
+        resume_best_val_loss=locals().get('_resume_best_val_loss'),
     )
     model = result['model']
 
     # Test generation
     print("\nSample generations:")
     for prompt in ['HELLO', 'HOW ARE YOU', 'TELL ME A JOKE', 'WHO ARE YOU', 'THANKS']:
-        out = generate(model, prompt, 50, temperature=0.8, device=device)
+        out = generate(model, prompt, max_new=60, temperature=0.8,
+                       preserve_case=args.preserve_case, device=device, tok=tok)
         print(f"  {prompt:20s} → {out}")

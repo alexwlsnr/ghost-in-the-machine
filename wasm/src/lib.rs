@@ -1,9 +1,10 @@
 /// Tier 2.5 Wasm Kernel -- Float Transformer
 ///
-/// Supports three weight formats:
-///   - matmul_f32w:  fp32 weights (current production path)
-///   - matmul_8bit:  i8 weights + per-tensor scale (57MB for Specter)
-///   - matmul_4bit:  4-bit packed weights + per-tensor scale (28MB for Specter)
+/// Supports four weight formats:
+///   - matmul_f32w:     fp32 weights (current production path)
+///   - matmul_8bit:     i8 weights + per-tensor scale
+///   - matmul_4bit:     4-bit packed weights + per-tensor scale
+///   - matmul_ternary:  2-bit ternary weights (4 per byte) + per-tensor scale
 ///
 /// 4-bit packing convention (matches py/serialize.py):
 ///   Each byte stores 2 weights as 4-bit offset-binary.
@@ -470,5 +471,226 @@ pub unsafe extern "C" fn matmul_f32w_simd(
         }
 
         out[o] = sum;
+    }
+}
+
+// --- Ternary matmul ---
+//
+// Packing layout produced by py/serialize.py quantize_ternary():
+//   4 ternary codes per byte, high bits first (2 bits each)
+//   code 0b00 (-1): negative  → subtract scale * input[i]
+//   code 0b01 ( 0): zero      → no-op
+//   code 0b10 (+1): positive  → add scale * input[i]
+//   code 0b11:      unused, treated as zero
+
+#[no_mangle]
+pub unsafe extern "C" fn matmul_ternary(
+    weights: *const u8,
+    scale: f32,
+    biases: *const f32,
+    input: *const f32,
+    output: *mut f32,
+    in_dim: i32,
+    out_dim: i32,
+) {
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let n_bytes = (in_dim * out_dim + 3) / 4;
+    let weight_bytes = core::slice::from_raw_parts(weights, n_bytes);
+    let bias_slice   = core::slice::from_raw_parts(biases,  out_dim);
+    let input_slice  = core::slice::from_raw_parts(input,   in_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    // Process 4 ternary codes per byte — eliminates per-element division.
+    // in_dim % 4 == 0 for all real model dims; tail handles edge cases.
+    let bytes_per_row = in_dim / 4;
+    let tail          = in_dim % 4;
+    for o in 0..out_dim {
+        let mut sum           = bias_slice[o];
+        let flat_row_start    = o * in_dim;
+        let mut i             = 0usize;
+        // Main loop: 4 codes per byte, sequential access, no division
+        for _ in 0..bytes_per_row {
+            let byte = weight_bytes[(flat_row_start + i) / 4];
+            let c0 = (byte >> 6) & 0x3;
+            let c1 = (byte >> 4) & 0x3;
+            let c2 = (byte >> 2) & 0x3;
+            let c3 =  byte       & 0x3;
+            if c0 == 2 { sum += scale * input_slice[i];     } else if c0 == 0 { sum -= scale * input_slice[i];     }
+            if c1 == 2 { sum += scale * input_slice[i + 1]; } else if c1 == 0 { sum -= scale * input_slice[i + 1]; }
+            if c2 == 2 { sum += scale * input_slice[i + 2]; } else if c2 == 0 { sum -= scale * input_slice[i + 2]; }
+            if c3 == 2 { sum += scale * input_slice[i + 3]; } else if c3 == 0 { sum -= scale * input_slice[i + 3]; }
+            i += 4;
+        }
+        // Tail (≤3 elements; only occurs when in_dim is not a multiple of 4)
+        for j in 0..tail {
+            let flat  = flat_row_start + i + j;
+            let byte  = weight_bytes[flat / 4];
+            let shift = 6 - (flat % 4) * 2;
+            let code  = (byte >> shift) & 0x3;
+            if code == 2 { sum += scale * input_slice[i + j]; }
+            else if code == 0 { sum -= scale * input_slice[i + j]; }
+        }
+        output_slice[o] = sum;
+    }
+}
+
+// SIMD ternary matmul using a 256-entry lookup table (4KB, fits in L1 cache).
+// Each byte maps to a v128 of {-scale, 0, +scale} for its 4 ternary codes.
+// This eliminates all branches in the inner loop.
+#[cfg(target_feature = "simd128")]
+#[no_mangle]
+pub unsafe extern "C" fn matmul_ternary_simd(
+    weights: *const u8,
+    scale: f32,
+    biases: *const f32,
+    input: *const f32,
+    output: *mut f32,
+    in_dim: i32,
+    out_dim: i32,
+) {
+    use core::arch::wasm32::*;
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let bytes_per_row = in_dim / 4;
+
+    let weight_bytes = core::slice::from_raw_parts(weights, out_dim * bytes_per_row);
+    let bias_slice   = core::slice::from_raw_parts(biases,  out_dim);
+    let input_slice  = core::slice::from_raw_parts(input,   in_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    // Build lookup table: lut[byte] = f32x4 of sign values {-1, 0, +1} for each code.
+    // 256 entries × 16 bytes = 4 KB — stays in L1 cache.
+    let mut lut = [[0.0f32; 4]; 256];
+    for b in 0usize..256 {
+        for j in 0..4 {
+            let code = (b >> (6 - j * 2)) & 0x3;
+            lut[b][j] = match code { 0 => -1.0, 2 => 1.0, _ => 0.0 };
+        }
+    }
+
+    let chunks4 = bytes_per_row / 4;   // process 4 bytes (16 codes) per SIMD round
+    let tail    = bytes_per_row % 4;
+
+    for o in 0..out_dim {
+        let mut acc = f32x4_splat(0.0_f32);
+        let row_start = o * bytes_per_row;
+
+        let mut b = 0usize;
+        for _ in 0..chunks4 {
+            let i = b * 4;
+            // Unroll 4 bytes per inner iter to keep the pipeline busy
+            macro_rules! apply_byte {
+                ($off:expr) => {{
+                    let byte = weight_bytes[row_start + b + $off] as usize;
+                    let signs = v128_load(lut[byte].as_ptr() as *const v128);
+                    let inp   = v128_load(input_slice.as_ptr().add(i + $off * 4) as *const v128);
+                    acc = f32x4_add(acc, f32x4_mul(signs, inp));
+                }};
+            }
+            apply_byte!(0); apply_byte!(1); apply_byte!(2); apply_byte!(3);
+            b += 4;
+        }
+        // Tail bytes
+        for tb in 0..tail {
+            let i = b * 4 + tb * 4;
+            let byte = weight_bytes[row_start + b + tb] as usize;
+            let signs = v128_load(lut[byte].as_ptr() as *const v128);
+            let inp   = v128_load(input_slice.as_ptr().add(i) as *const v128);
+            acc = f32x4_add(acc, f32x4_mul(signs, inp));
+        }
+
+        // Scale accumulator + horizontal reduce + bias
+        acc = f32x4_mul(acc, f32x4_splat(scale));
+        output_slice[o] = bias_slice[o]
+            + f32x4_extract_lane::<0>(acc)
+            + f32x4_extract_lane::<1>(acc)
+            + f32x4_extract_lane::<2>(acc)
+            + f32x4_extract_lane::<3>(acc);
+    }
+}
+
+// --- Sparse ternary matmul (load-time conversion) ---
+//
+// Convert packed 2-bit ternary weights to CSR-style sparse index lists.
+// Called once at model load time — never during inference.
+//
+// counts_out: [pos_count_0, neg_count_0, pos_count_1, neg_count_1, ...] as u32
+// pos_out:    flat array of positive column indices (u16), all rows concat'd
+// neg_out:    flat array of negative column indices (u16), all rows concat'd
+
+#[no_mangle]
+pub unsafe extern "C" fn ternary_convert_to_sparse(
+    weights:    *const u8,
+    counts_out: *mut u32,
+    pos_out:    *mut u16,
+    neg_out:    *mut u16,
+    in_dim:     i32,
+    out_dim:    i32,
+) {
+    let in_dim  = in_dim  as usize;
+    let out_dim = out_dim as usize;
+    let bytes_per_row = (in_dim + 3) / 4;
+    let weight_bytes = core::slice::from_raw_parts(weights, out_dim * bytes_per_row);
+    let counts_slice = core::slice::from_raw_parts_mut(counts_out, out_dim * 2);
+
+    let mut pos_off = 0usize;
+    let mut neg_off = 0usize;
+
+    for o in 0..out_dim {
+        let mut pc = 0u32;
+        let mut nc = 0u32;
+        let flat_row_start = o * in_dim;
+
+        for i in 0..in_dim {
+            let flat  = flat_row_start + i;
+            let byte  = weight_bytes[flat / 4];
+            let shift = 6 - (flat % 4) * 2;
+            let code  = (byte >> shift) & 0x3;
+            match code {
+                2 => { *pos_out.add(pos_off) = i as u16; pos_off += 1; pc += 1; }
+                0 => { *neg_out.add(neg_off) = i as u16; neg_off += 1; nc += 1; }
+                _ => {}
+            }
+        }
+
+        counts_slice[o * 2]     = pc;
+        counts_slice[o * 2 + 1] = nc;
+    }
+}
+
+// Sparse ternary matrix-vector multiply.
+// counts: [pos_count_0, neg_count_0, pos_count_1, neg_count_1, ...] as u32
+// pos/neg: flat index arrays produced by ternary_convert_to_sparse
+// output[o] = scale * (sum_pos(input[i]) - sum_neg(input[i])) + bias[o]
+
+#[no_mangle]
+pub unsafe extern "C" fn matmul_ternary_sparse(
+    counts:  *const u32,   // 2 × out_dim entries
+    pos:     *const u16,   // positive column indices
+    neg:     *const u16,   // negative column indices
+    scale:   f32,
+    biases:  *const f32,
+    input:   *const f32,
+    output:  *mut f32,
+    out_dim: i32,
+) {
+    let out_dim = out_dim as usize;
+    let counts_slice = core::slice::from_raw_parts(counts, out_dim * 2);
+    let bias_slice   = core::slice::from_raw_parts(biases, out_dim);
+    let output_slice = core::slice::from_raw_parts_mut(output, out_dim);
+
+    let mut pos_off = 0usize;
+    let mut neg_off = 0usize;
+
+    for o in 0..out_dim {
+        let pc = counts_slice[o * 2]     as usize;
+        let nc = counts_slice[o * 2 + 1] as usize;
+        let mut sum = 0.0f32;
+        for j in 0..pc { sum += *input.add(*pos.add(pos_off + j) as usize); }
+        for j in 0..nc { sum -= *input.add(*neg.add(neg_off + j) as usize); }
+        output_slice[o] = sum * scale + bias_slice[o];
+        pos_off += pc;
+        neg_off += nc;
     }
 }
