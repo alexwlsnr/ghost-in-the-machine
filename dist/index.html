@@ -511,7 +511,7 @@ const perfInfo    = document.getElementById('perf-info');
 const switcher    = document.getElementById('model-switcher');
 
 let temperature = 0.8;
-const TEMP_PRESETS = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5];
+const TEMP_MIN = 0.1, TEMP_MAX = 2.0, TEMP_STEP = 0.1;
 
 // ── Multi-model state ──────────────────────────────────────────────────────
 // registry: array of model descriptors from models.json
@@ -532,12 +532,12 @@ function updateTempDisplay() {
 }
 
 document.getElementById('temp-up').addEventListener('click', () => {
-  const idx = TEMP_PRESETS.indexOf(temperature);
-  if (idx < TEMP_PRESETS.length - 1) { temperature = TEMP_PRESETS[idx + 1]; updateTempDisplay(); }
+  temperature = Math.min(TEMP_MAX, Math.round((temperature + TEMP_STEP) * 10) / 10);
+  updateTempDisplay();
 });
 document.getElementById('temp-down').addEventListener('click', () => {
-  const idx = TEMP_PRESETS.indexOf(temperature);
-  if (idx > 0) { temperature = TEMP_PRESETS[idx - 1]; updateTempDisplay(); }
+  temperature = Math.max(TEMP_MIN, Math.round((temperature - TEMP_STEP) * 10) / 10);
+  updateTempDisplay();
 });
 
 function appendLine(text, cls = '') {
