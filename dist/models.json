@@ -257,6 +257,21 @@
       "top_k": 20
     },
     {
+      "id": "wisp-bpe-ternary-modern",
+      "name": "Wisp BPE Ternary Modern",
+      "description": "RoPE + RMSNorm + SwiGLU + ternary weights — 7.6M params · 11.6MB · ~900 char context",
+      "bin": "model_wisp_bpe_ternary_modern.bin",
+      "json": "model_wisp_bpe_ternary_modern.json",
+      "params": "7.6M",
+      "ctx": 256,
+      "size_mb": 11.6,
+      "available": true,
+      "primary": false,
+      "max_new": 80,
+      "temp": 0.6,
+      "rep_penalty": 1.35
+    },
+    {
       "id": "shade-bpe-factual",
       "name": "Shade BPE Factual",
       "description": "Ablation: factual fine-tune on Shade BPE Ternary — 11M params · 19.6MB",
