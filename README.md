@@ -1,8 +1,49 @@
 # Ghost in the Machine — Tier 2.5 µLM
 
-A **3.3M-parameter byte-level tiny transformer** that runs entirely in your browser via WebAssembly. No server, no API keys, no GPU — the model loads in ~58ms and streams coherent conversational English locally.
+A family of **tiny transformers** that run entirely in your browser via WebAssembly.
+No server, no API keys, no GPU — models load in well under a second and stream
+coherent conversational English locally.
 
 **[Live demo →](https://alexwlsnr.github.io/ghost-in-the-machine/)**
+
+> **⚠️ README staleness note.** The "Architecture / Training / Bundle" sections below
+> describe the *original* 3.3M byte-level tier-2.5 model. The current zoo is much
+> larger and uses BPE tokenizers and ternary weights — Wisp (~7.6M), Shade (~11M),
+> Spectre v1/v2 (~35M), all `ternary_modern` (RoPE + RMSNorm + SwiGLU). Treat the
+> sections below as historical until they're refreshed; the **Tokenizers** and
+> **GGUF / llama.cpp interop** sections immediately below are current.
+
+## Tokenizers
+
+Three tokenization schemes are supported. A model's weights are bound to the exact
+tokenizer it trained on, so the engine selects the right one per model via the
+manifest's `tokenizer.type` field:
+
+| Scheme | `tokenizer.type` | Notes |
+|--------|------------------|-------|
+| raw-byte | *(no `tokenizer` section)* | ids = bytes; earliest models |
+| char-BPE | absent / `"char"` | legacy custom BPE; all current Wisp/Shade/Spectre models; **not** llama.cpp-compatible |
+| bytelevel | `"bytelevel"` | GPT-2 byte-level BPE; **llama.cpp/GGUF-compatible** |
+
+Full details — algorithms, why char-BPE can't run in stock llama.cpp, and where each
+scheme lives across training / serialization / browser / GGUF — are in
+**[`docs/tokenizers.md`](docs/tokenizers.md)**.
+
+## GGUF / llama.cpp interop
+
+`ternary_modern` checkpoints convert to GGUF and run in stock llama.cpp:
+
+```bash
+.venv/bin/python3 py/convert_to_gguf.py --checkpoint ckpt/MODEL.pt \
+    --tokenizer data/TOKENIZER.json --out dist/gguf/MODEL.gguf
+.venv/bin/python3 py/verify_gguf.py --checkpoint ckpt/MODEL.pt --gguf dist/gguf/MODEL.gguf
+.venv/bin/python3 chat_gguf.py dist/gguf/MODEL.gguf   # interactive REPL
+```
+
+Weights convert with 100% logit fidelity. For the *embedded* tokenizer to also be
+faithful in stock `llama-cli`/ollama, the model must be trained on a **bytelevel**
+tokenizer (char-BPE models run in llama.cpp only when fed external token IDs). See
+[`docs/tokenizers.md`](docs/tokenizers.md).
 
 ## Architecture
 

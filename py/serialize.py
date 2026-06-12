@@ -179,6 +179,42 @@ def quantize_8bit(tensor: torch.Tensor) -> tuple[bytes, float]:
     return quant.tobytes(), scale
 
 
+# --- Tokenizer normalization ---
+
+def _normalize_tokenizer(tok: dict) -> dict:
+    """Normalize a tokenizer file into the browser manifest schema with a `type`.
+
+    Two input shapes are accepted:
+      - legacy char-level BPE (train_bpe.py): {vocab, id_to_token, merges, special}
+        -> emitted as type "char".
+      - HuggingFace byte-level BPE (train_bpe_bytelevel.py): {model:{vocab,merges},
+        added_tokens, ...} -> flattened to {vocab, id_to_token, merges, special}
+        and tagged type "bytelevel" so the browser uses the byte-level decoder.
+    Both end up as {type, vocab, id_to_token, merges, special} — one schema the
+    JS engine reads, with `type` selecting the tokenization rules.
+    """
+    if "model" in tok and "added_tokens" in tok:
+        vocab = tok["model"]["vocab"]                      # token_str -> id
+        id_to_token = {str(i): t for t, i in vocab.items()}
+        special = {}
+        for a in tok["added_tokens"]:
+            name = {"<PAD>": "pad", "<EOS>": "eos", "<SEP>": "sep"}.get(a["content"])
+            if name:
+                special[name] = a["id"]
+        merges = [m if isinstance(m, str) else f"{m[0]} {m[1]}"
+                  for m in tok["model"]["merges"]]
+        return {
+            "type": "bytelevel",
+            "vocab_size": len(vocab),
+            "special": special,
+            "vocab": vocab,
+            "id_to_token": id_to_token,
+            "merges": merges,
+        }
+    # legacy char-level BPE — already in the right shape; just tag it
+    return {"type": "char", **tok}
+
+
 # --- Serializer ---
 
 def serialize(
@@ -380,8 +416,10 @@ def serialize(
             # Try path relative to checkpoint
             tok_path = Path(checkpoint_path).parent / tok_path.name
         if tok_path.exists():
-            manifest['tokenizer'] = json.loads(tok_path.read_text())
-            print(f"Tokenizer embedded from {tok_path} ({tok_path.stat().st_size // 1024} KB)")
+            manifest['tokenizer'] = _normalize_tokenizer(json.loads(tok_path.read_text()))
+            kind = manifest['tokenizer']['type']
+            print(f"Tokenizer embedded from {tok_path} "
+                  f"({tok_path.stat().st_size // 1024} KB, type={kind})")
         else:
             print(f"Warning: tokenizer_file {tok_file} not found — manifest will lack tokenizer")
 

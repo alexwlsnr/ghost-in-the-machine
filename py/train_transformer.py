@@ -1215,14 +1215,24 @@ if __name__ == '__main__':
     tok = None
     if args.tokenizer:
         import importlib.util, sys as _sys
-        _spec = importlib.util.spec_from_file_location(
-            'bpe_tokenizer',
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bpe_tokenizer.py'),
-        )
-        _mod = importlib.util.module_from_spec(_spec)
-        _spec.loader.exec_module(_mod)
-        tok = _mod.BPETokenizer(args.tokenizer)
-        print(f"BPE tokenizer loaded: {tok.vocab_size} tokens from {args.tokenizer}")
+        _here = os.path.dirname(os.path.abspath(__file__))
+
+        def _load(modname, filename):
+            _spec = importlib.util.spec_from_file_location(
+                modname, os.path.join(_here, filename))
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            return _mod
+
+        _byte = _load('byte_bpe_tokenizer', 'byte_bpe_tokenizer.py')
+        if _byte.is_hf_tokenizer(args.tokenizer):
+            tok = _byte.ByteBPETokenizer(args.tokenizer)
+            print(f"Byte-level BPE tokenizer (llama.cpp-compatible): "
+                  f"{tok.vocab_size} tokens from {args.tokenizer}")
+        else:
+            _mod = _load('bpe_tokenizer', 'bpe_tokenizer.py')
+            tok = _mod.BPETokenizer(args.tokenizer)
+            print(f"BPE tokenizer loaded: {tok.vocab_size} tokens from {args.tokenizer}")
 
     # Load training data — supports both single-turn (Q|R) and multi-turn (Q1|R1|Q2|R2|...) lines.
     pairs = []

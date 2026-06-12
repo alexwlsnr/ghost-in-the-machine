@@ -3,8 +3,8 @@
  */
 
 import type { GPUEngine } from './gpu_engine.js';
-import { BPETokenizer } from './bpe_tokenizer.js';
-import type { BPEData } from './bpe_tokenizer.js';
+import { makeTokenizer } from './bpe_tokenizer.js';
+import type { BPEData, Tokenizer } from './bpe_tokenizer.js';
 
 export interface SectionDef { offset: number; size: number; shape: number[]; dtype: string; scale?: number; scales_offset?: number; scales_size?: number; group_size?: number; }
 export interface Arch { vocab_size: number; d_model: number; n_heads: number; n_layers: number; d_ff: number; max_len: number;
@@ -83,7 +83,7 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
     architecture: Arch; sections: Record<string, SectionDef>;
     tokenizer?: BPEData;
   };
-  const bpe = manifest.tokenizer ? new BPETokenizer(manifest.tokenizer) : undefined;
+  const bpe = manifest.tokenizer ? makeTokenizer(manifest.tokenizer) : undefined;
   const sec = manifest.sections;
   const mem = api.memory;
 
@@ -578,7 +578,7 @@ export function buildContextTokens(
   query: string,
   maxLen: number,
   maxHistory: number = 1,
-  bpe?: BPETokenizer,
+  bpe?: Tokenizer,
 ): number[] {
   const _enc = bpe ? (s: string) => bpe.encode(s) : encode;
   const _SEP  = bpe ? bpe.SEP : SEP;
@@ -678,7 +678,7 @@ export async function* generate(
   punctStop = true,
 ): AsyncGenerator<Step> {
   const { api, manifest: arch, sec, base } = model;
-  const bpeT = (model as any).bpe as BPETokenizer | undefined;
+  const bpeT = (model as any).bpe as Tokenizer | undefined;
 
   // Token-type helpers — byte-level defaults when no BPE tokenizer present
   const _SEP = bpeT ? bpeT.SEP : SEP;
