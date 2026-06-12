@@ -34,7 +34,7 @@
     {
       "id": "spectre-v2-preview",
       "name": "Spectre v2 (preview)",
-      "description": "35M params · 24MB · ternary_modern · ctx 512 · SODA blend (134M tokens) · mid-training preview",
+      "description": "35M params · 24MB · ternary_modern · ctx 512 · SODA blend (134M tokens) · mid-training preview (ep36, val 1.82)",
       "bin": "model_spectre_v2_preview.bin",
       "json": "model_spectre_v2_preview.json",
       "params": "35.6M",
