@@ -47,13 +47,15 @@ jobs:
       - name: Build Wasm kernel (SIMD)
         if: steps.changes.outputs.wasm == 'true'
         working-directory: wasm
-        run: RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release
+        # Separate target dir — the SIMD build must NOT overwrite the scalar one
+        # (same default target dir would clobber it, shipping SIMD as the scalar fallback).
+        run: RUSTFLAGS="-C target-feature=+simd128" cargo build --target wasm32-unknown-unknown --release --target-dir target-simd
 
       - name: Copy Wasm kernels to dist
         if: steps.changes.outputs.wasm == 'true'
         run: |
           cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel.wasm
-          cp wasm/target/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel_simd.wasm
+          cp wasm/target-simd/wasm32-unknown-unknown/release/tier2_kernel.wasm dist/tier2_kernel_simd.wasm
 
       # ── TypeScript (only if ts/src changed) ───────────────────────────
       - name: Setup Node.js

@@ -32,6 +32,24 @@
       "top_k": 20
     },
     {
+      "id": "spectre-v2-preview",
+      "name": "Spectre v2 (preview)",
+      "description": "35M params · 24MB · ternary_modern · ctx 512 · SODA blend (134M tokens) · mid-training preview",
+      "bin": "model_spectre_v2_preview.bin",
+      "json": "model_spectre_v2_preview.json",
+      "params": "35.6M",
+      "ctx": 512,
+      "size_mb": 24.2,
+      "available": true,
+      "primary": true,
+      "default": true,
+      "max_new": 120,
+      "temp": 0.7,
+      "top_k": 40,
+      "top_p": 0.9,
+      "rep_penalty": 1.2
+    },
+    {
       "id": "spectre-v1",
       "name": "Spectre",
       "description": "35M params · 24MB · ternary_modern · trained on Revenant (38M tokens)",
@@ -42,7 +60,6 @@
       "size_mb": 24.2,
       "available": true,
       "primary": true,
-      "default": true,
       "max_new": 120,
       "temp": 0.7,
       "top_k": 40,
