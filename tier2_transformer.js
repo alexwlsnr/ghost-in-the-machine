@@ -1,7 +1,7 @@
 /**
  * Tier 2.5 Ghost Transformer — Float32 Orchestrator (fixed lengths)
  */
-import { BPETokenizer } from './bpe_tokenizer.js';
+import { makeTokenizer } from './bpe_tokenizer.js';
 const PAD = 256;
 const SEP = 1; // ASCII SOH — query/response separator (matches Python SEP_TOKEN)
 const EOS = 257;
@@ -47,7 +47,7 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const wasm = await WebAssembly.instantiate(wasmBuf);
     const api = wasm.instance.exports;
     const manifest = JSON.parse(new TextDecoder().decode(jsonBuf));
-    const bpe = manifest.tokenizer ? new BPETokenizer(manifest.tokenizer) : undefined;
+    const bpe = manifest.tokenizer ? makeTokenizer(manifest.tokenizer) : undefined;
     const sec = manifest.sections;
     const mem = api.memory;
     // CRITICAL: Wasm module uses memory [0, __heap_base) for its own stack/data.
@@ -687,3 +687,4 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     }
     yield { char: '', token: _PAD, done: true };
 }
+//# sourceMappingURL=tier2_transformer.js.map
