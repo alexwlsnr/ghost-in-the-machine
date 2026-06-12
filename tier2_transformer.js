@@ -687,4 +687,3 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     }
     yield { char: '', token: _PAD, done: true };
 }
-//# sourceMappingURL=tier2_transformer.js.map
