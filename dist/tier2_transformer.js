@@ -68,43 +68,52 @@ export async function instantiateModel(wasmBuf, binBuf, jsonBuf) {
     const mem8 = new Uint8Array(mem.buffer);
     const bin8 = new Uint8Array(binBuf);
     mem8.set(bin8, base);
-    // Load-time sparse conversion for ternary models.
-    // CRITICAL: sparse buffers must live AFTER the forward-pass scratch area.
-    // The forward() ba() allocator starts at base+binSize and grows upward —
-    // placing sparse buffers there would cause the scratch to overwrite them.
-    // Layout: [model binary][forward scratch margin][sparse index lists]
-    const sparseBuffers = new Map();
-    if (api.ternary_convert_to_sparse) {
-        // Compute worst-case total sparse size so we can grow memory once
-        let totalSparseBytes = 0;
-        for (const s of Object.values(sec)) {
-            if (s.dtype !== 'ternary')
-                continue;
-            const [outD, inD] = s.shape;
-            totalSparseBytes += outD * 2 * 4 + outD * inD * 4 + 16; // counts + worst-case pos+neg + align
-        }
-        // Sparse area starts after model binary AND forward scratch — no overlap possible
-        let sparseBase = base + binSize + margin;
-        sparseBase = (sparseBase + 15) & ~15;
-        const sparseEnd = sparseBase + totalSparseBytes;
-        const curPages2 = mem.buffer.byteLength / 65536;
-        const needPages2 = Math.ceil(sparseEnd / 65536);
-        if (needPages2 > curPages2)
-            mem.grow(needPages2 - curPages2);
-        for (const [name, s] of Object.entries(sec)) {
-            if (s.dtype !== 'ternary')
-                continue;
-            const [outD, inD] = s.shape;
-            const maxNonZero = outD * inD;
-            const countsPtr = sparseBase;
-            const posPtr = countsPtr + outD * 2 * 4;
-            const negPtr = posPtr + maxNonZero * 2;
-            api.ternary_convert_to_sparse(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
-            sparseBuffers.set(name, { countsPtr, posPtr, negPtr });
-            sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
-        }
+    // Ternary matmul kernel choice (see test/bench_inference.mjs / bench_profile.mjs):
+    //   - DENSE SIMD (matmul_ternary_simd): ~143 tok/s — the path for all modern browsers.
+    //   - SPARSE (matmul_ternary_sparse):   ~76 tok/s — slower than dense SIMD because
+    //     BitNet ternary weights are only ~30-50% zeros, so the sparse format moves ~5×
+    //     more memory (≈2 bytes/nonzero, random access) than dense (0.25 bytes/weight).
+    //   - DENSE SCALAR (matmul_ternary):    ~7 tok/s — catastrophically slow.
+    // So we only build the sparse index (costs ~128 MB scratch for a 24 MB model) when
+    // SIMD is unavailable, where sparse is the best fallback. SIMD builds skip it entirely.
+    if (!api.matmul_ternary_simd && api.ternary_convert_to_sparse) {
+        buildSparseIndex(api, sec, base, binSize, margin, mem);
     }
-    return { api, manifest: manifest.architecture, sec, base, sparseBuffers, bpe };
+    return { api, manifest: manifest.architecture, sec, base, bpe };
+}
+// Sparse-index scratch keyed by api instance — looked up in makeMatmulDispatch without
+// threading the map through every forward()/forwardIncremental()/prefill() call.
+const sparseIndexByApi = new WeakMap();
+function buildSparseIndex(api, sec, base, binSize, margin, mem) {
+    // Layout: [model binary][forward scratch margin][sparse index lists] — no overlap with
+    // the forward() ba() allocator, which starts at base+binSize and grows upward.
+    let totalSparseBytes = 0;
+    for (const s of Object.values(sec)) {
+        if (s.dtype !== 'ternary')
+            continue;
+        const [outD, inD] = s.shape;
+        totalSparseBytes += outD * 2 * 4 + outD * inD * 4 + 16;
+    }
+    let sparseBase = (base + binSize + margin + 15) & ~15;
+    const sparseEnd = sparseBase + totalSparseBytes;
+    const curPages = mem.buffer.byteLength / 65536;
+    const needPages = Math.ceil(sparseEnd / 65536);
+    if (needPages > curPages)
+        mem.grow(needPages - curPages);
+    const buffers = new Map();
+    for (const [name, s] of Object.entries(sec)) {
+        if (s.dtype !== 'ternary')
+            continue;
+        const [outD, inD] = s.shape;
+        const maxNonZero = outD * inD;
+        const countsPtr = sparseBase;
+        const posPtr = countsPtr + outD * 2 * 4;
+        const negPtr = posPtr + maxNonZero * 2;
+        api.ternary_convert_to_sparse(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
+        buffers.set(name, { countsPtr, posPtr, negPtr });
+        sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
+    }
+    sparseIndexByApi.set(api, buffers);
 }
 export function encode(text) {
     const t = [];
@@ -118,21 +127,22 @@ export function encode(text) {
 // ─── Matmul dispatch ───────────────────────────────────────────────
 // Routes weight matmul to the correct kernel based on section dtype.
 // Biases are always fp32. Head weight stays fp32 (mixed-precision layout).
-function makeMatmulDispatch(api, sec, base, sparseBuffers) {
+function makeMatmulDispatch(api, sec, base) {
     const S = (name) => base + sec[name].offset;
     const fp32mw = api.matmul_f32w_simd ?? api.matmul_f32w;
     const ternaryMw = api.matmul_ternary_simd ?? api.matmul_ternary;
+    // Sparse index is present only on no-SIMD builds (see instantiateModel). When it
+    // exists, sparse beats dense-scalar; otherwise dense SIMD is fastest.
+    const sparse = sparseIndexByApi.get(api);
     return (wName, bPtr, inp, out, inD, outD) => {
         const s = sec[wName];
         const wPtr = S(wName);
         if (s.dtype === 'ternary') {
-            const sp = sparseBuffers?.get(wName);
-            if (sp && api.matmul_ternary_sparse) {
+            const sp = sparse?.get(wName);
+            if (sp)
                 api.matmul_ternary_sparse(sp.countsPtr, sp.posPtr, sp.negPtr, s.scale ?? 1.0, bPtr, inp, out, outD);
-            }
-            else {
+            else
                 ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-            }
         }
         else if (s.dtype === 'int8')
             api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
@@ -179,14 +189,14 @@ function getRoPE(dHead, maxLen) {
         ropeCache.set(key, precomputeRoPE(dHead, maxLen));
     return ropeCache.get(key);
 }
-export function forward(api, sec, arch, tokens, base, sparseBuffers) {
+export function forward(api, sec, arch, tokens, base) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
     const useRope = !!arch.use_rope;
     const useSwiglu = !!arch.use_swiglu;
     const useRmsnorm = !!arch.use_rmsnorm;
     // Section pointer helper: actual address = base + manifest offset
     const S = (name) => base + sec[name].offset;
-    const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
+    const mw = makeMatmulDispatch(api, sec, base);
     let off = base;
     for (const s of Object.values(sec)) {
         const end = base + s.offset + s.size + (s.scales_size ?? 0);
@@ -313,14 +323,14 @@ export function createCache(model) {
  * On entry: cache.length === pos
  * On exit:  cache.length === pos + 1
  */
-function forwardIncremental(api, sec, arch, token, pos, base, cache, sparseBuffers) {
+function forwardIncremental(api, sec, arch, token, pos, base, cache) {
     const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
     const mem = api.memory;
     const useRope = !!arch.use_rope;
     const useSwiglu = !!arch.use_swiglu;
     const useRmsnorm = !!arch.use_rmsnorm;
     const S = (name) => base + sec[name].offset;
-    const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
+    const mw = makeMatmulDispatch(api, sec, base);
     const rope = useRope ? getRoPE(dh, arch.max_len) : null;
     let off = base;
     for (const s of Object.values(sec)) {
@@ -443,11 +453,11 @@ function forwardIncremental(api, sec, arch, token, pos, base, cache, sparseBuffe
  * Returns the logits for the last prompt position (seeds the first sampled token).
  * cache.length will equal tokens.length after this returns.
  */
-function prefill(api, sec, arch, tokens, base, cache, sparseBuffers) {
+function prefill(api, sec, arch, tokens, base, cache) {
     cache.length = 0;
     let logits;
     for (let p = 0; p < tokens.length; p++) {
-        logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache, sparseBuffers);
+        logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache);
     }
     return logits;
 }
@@ -499,10 +509,46 @@ export function sampleFromLogits(logits, temp, topK, topP, rand, repPenalty = 1.
                 logits[tok] /= repPenalty;
         }
     }
-    const pairs = Array.from({ length: n }, (_, i) => [i, logits[i]]);
-    pairs.sort((a, b) => b[1] - a[1]);
     const k = topK > 0 ? Math.min(topK, n) : n;
-    const candidates = pairs.slice(0, k);
+    // Select the top-k logits. For k << n (the common top-k case) use an
+    // allocation-free partial selection instead of sorting all n tuples — the
+    // candidate set is identical, so sampling stays deterministic.
+    let candidates;
+    if (k < n) {
+        const idx = new Int32Array(k);
+        const val = new Float32Array(k);
+        let count = 0, minVal = Infinity, minPos = 0;
+        const findMin = () => {
+            minVal = val[0];
+            minPos = 0;
+            for (let j = 1; j < k; j++)
+                if (val[j] < minVal) {
+                    minVal = val[j];
+                    minPos = j;
+                }
+        };
+        for (let i = 0; i < n; i++) {
+            const v = logits[i];
+            if (count < k) {
+                idx[count] = i;
+                val[count] = v;
+                count++;
+                if (count === k)
+                    findMin();
+            }
+            else if (v > minVal) {
+                idx[minPos] = i;
+                val[minPos] = v;
+                findMin();
+            }
+        }
+        candidates = Array.from({ length: k }, (_, j) => [idx[j], val[j]]);
+        candidates.sort((a, b) => b[1] - a[1]);
+    }
+    else {
+        candidates = Array.from({ length: n }, (_, i) => [i, logits[i]]);
+        candidates.sort((a, b) => b[1] - a[1]);
+    }
     const maxL = candidates[0][1];
     let sum = 0;
     const weighted = candidates.map(([idx, l]) => {
@@ -595,8 +641,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
     // -- Cached path ----------------------------------------------------
     if (cache !== undefined) {
         cache.length = 0;
-        const sp = model.sparseBuffers;
-        let logits = prefill(api, sec, arch, tokens, base, cache, sp);
+        let logits = prefill(api, sec, arch, tokens, base, cache);
         for (let s = 0; s < maxNew; s++) {
             if (cache.length >= win) {
                 yield { char: '', token: _PAD, done: true };
@@ -614,7 +659,7 @@ export async function* generate(model, prompt, maxNew = 160, temp = 0.8, rand = 
             }
             generated.push(next);
             yield { char: emitAndTrack(next), token: next, done: false };
-            logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
+            logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
         }
         yield { char: '', token: _PAD, done: true };
         return;

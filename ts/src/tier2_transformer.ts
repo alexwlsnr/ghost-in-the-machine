@@ -14,9 +14,10 @@ export interface Arch { vocab_size: number; d_model: number; n_heads: number; n_
 interface WasmApi {
   memory: WebAssembly.Memory;
   matmul_ternary(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
-  matmul_ternary_simd(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
+  // SIMD/sparse exports exist only on certain wasm builds — optional.
+  matmul_ternary_simd?(w: number, scale: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   matmul_ternary_sparse(counts: number, pos: number, neg: number, scale: number, b: number, inp: number, out: number, outD: number): void;
-  ternary_convert_to_sparse(w: number, counts: number, pos: number, neg: number, inD: number, outD: number): void;
+  ternary_convert_to_sparse?(w: number, counts: number, pos: number, neg: number, inD: number, outD: number): void;
   matmul_f32w(w: number, b: number, inp: number, out: number, inD: number, outD: number): void;
   softmax_f32(p: number, n: number): void;
   softmax_causal_f32(p: number, s: number): void;
@@ -106,44 +107,60 @@ export async function instantiateModel(wasmBuf: BufferSource, binBuf: ArrayBuffe
   const bin8 = new Uint8Array(binBuf);
   mem8.set(bin8, base);
 
-  // Load-time sparse conversion for ternary models.
-  // CRITICAL: sparse buffers must live AFTER the forward-pass scratch area.
-  // The forward() ba() allocator starts at base+binSize and grows upward —
-  // placing sparse buffers there would cause the scratch to overwrite them.
-  // Layout: [model binary][forward scratch margin][sparse index lists]
-  const sparseBuffers = new Map<string, { countsPtr: number; posPtr: number; negPtr: number }>();
-  if (api.ternary_convert_to_sparse) {
-    // Compute worst-case total sparse size so we can grow memory once
-    let totalSparseBytes = 0;
-    for (const s of Object.values(sec) as SectionDef[]) {
-      if (s.dtype !== 'ternary') continue;
-      const [outD, inD] = s.shape;
-      totalSparseBytes += outD * 2 * 4 + outD * inD * 4 + 16; // counts + worst-case pos+neg + align
-    }
-
-    // Sparse area starts after model binary AND forward scratch — no overlap possible
-    let sparseBase = base + binSize + margin;
-    sparseBase = (sparseBase + 15) & ~15;
-
-    const sparseEnd = sparseBase + totalSparseBytes;
-    const curPages2 = mem.buffer.byteLength / 65536;
-    const needPages2 = Math.ceil(sparseEnd / 65536);
-    if (needPages2 > curPages2) mem.grow(needPages2 - curPages2);
-
-    for (const [name, s] of Object.entries(sec) as [string, SectionDef][]) {
-      if (s.dtype !== 'ternary') continue;
-      const [outD, inD] = s.shape;
-      const maxNonZero = outD * inD;
-      const countsPtr = sparseBase;
-      const posPtr    = countsPtr + outD * 2 * 4;
-      const negPtr    = posPtr    + maxNonZero * 2;
-      api.ternary_convert_to_sparse(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
-      sparseBuffers.set(name, { countsPtr, posPtr, negPtr });
-      sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
-    }
+  // Ternary matmul kernel choice (see test/bench_inference.mjs / bench_profile.mjs):
+  //   - DENSE SIMD (matmul_ternary_simd): ~143 tok/s — the path for all modern browsers.
+  //   - SPARSE (matmul_ternary_sparse):   ~76 tok/s — slower than dense SIMD because
+  //     BitNet ternary weights are only ~30-50% zeros, so the sparse format moves ~5×
+  //     more memory (≈2 bytes/nonzero, random access) than dense (0.25 bytes/weight).
+  //   - DENSE SCALAR (matmul_ternary):    ~7 tok/s — catastrophically slow.
+  // So we only build the sparse index (costs ~128 MB scratch for a 24 MB model) when
+  // SIMD is unavailable, where sparse is the best fallback. SIMD builds skip it entirely.
+  if (!(api as any).matmul_ternary_simd && api.ternary_convert_to_sparse) {
+    buildSparseIndex(api, sec, base, binSize, margin, mem);
   }
 
-  return { api, manifest: manifest.architecture, sec, base, sparseBuffers, bpe };
+  return { api, manifest: manifest.architecture, sec, base, bpe };
+}
+
+// Sparse-index scratch keyed by api instance — looked up in makeMatmulDispatch without
+// threading the map through every forward()/forwardIncremental()/prefill() call.
+const sparseIndexByApi = new WeakMap<WasmApi, Map<string, { countsPtr: number; posPtr: number; negPtr: number }>>();
+
+function buildSparseIndex(
+  api: WasmApi,
+  sec: Record<string, SectionDef>,
+  base: number,
+  binSize: number,
+  margin: number,
+  mem: WebAssembly.Memory,
+): void {
+  // Layout: [model binary][forward scratch margin][sparse index lists] — no overlap with
+  // the forward() ba() allocator, which starts at base+binSize and grows upward.
+  let totalSparseBytes = 0;
+  for (const s of Object.values(sec) as SectionDef[]) {
+    if (s.dtype !== 'ternary') continue;
+    const [outD, inD] = s.shape;
+    totalSparseBytes += outD * 2 * 4 + outD * inD * 4 + 16;
+  }
+  let sparseBase = (base + binSize + margin + 15) & ~15;
+  const sparseEnd = sparseBase + totalSparseBytes;
+  const curPages = mem.buffer.byteLength / 65536;
+  const needPages = Math.ceil(sparseEnd / 65536);
+  if (needPages > curPages) mem.grow(needPages - curPages);
+
+  const buffers = new Map<string, { countsPtr: number; posPtr: number; negPtr: number }>();
+  for (const [name, s] of Object.entries(sec) as [string, SectionDef][]) {
+    if (s.dtype !== 'ternary') continue;
+    const [outD, inD] = s.shape;
+    const maxNonZero = outD * inD;
+    const countsPtr = sparseBase;
+    const posPtr    = countsPtr + outD * 2 * 4;
+    const negPtr    = posPtr    + maxNonZero * 2;
+    api.ternary_convert_to_sparse!(base + s.offset, countsPtr, posPtr, negPtr, inD, outD);
+    buffers.set(name, { countsPtr, posPtr, negPtr });
+    sparseBase = (negPtr + maxNonZero * 2 + 15) & ~15;
+  }
+  sparseIndexByApi.set(api, buffers);
 }
 
 export function encode(text: string): number[] {
@@ -162,21 +179,20 @@ function makeMatmulDispatch(
   api: WasmApi,
   sec: Record<string, SectionDef>,
   base: number,
-  sparseBuffers?: Map<string, { countsPtr: number; posPtr: number; negPtr: number }>,
 ) {
   const S = (name: string) => base + sec[name].offset;
   const fp32mw    = (api as any).matmul_f32w_simd ?? api.matmul_f32w;
   const ternaryMw = (api as any).matmul_ternary_simd ?? api.matmul_ternary;
+  // Sparse index is present only on no-SIMD builds (see instantiateModel). When it
+  // exists, sparse beats dense-scalar; otherwise dense SIMD is fastest.
+  const sparse = sparseIndexByApi.get(api);
   return (wName: string, bPtr: number, inp: number, out: number, inD: number, outD: number) => {
     const s = sec[wName];
     const wPtr = S(wName);
     if (s.dtype === 'ternary') {
-      const sp = sparseBuffers?.get(wName);
-      if (sp && api.matmul_ternary_sparse) {
-        api.matmul_ternary_sparse(sp.countsPtr, sp.posPtr, sp.negPtr, s.scale ?? 1.0, bPtr, inp, out, outD);
-      } else {
-        ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
-      }
+      const sp = sparse?.get(wName);
+      if (sp) api.matmul_ternary_sparse(sp.countsPtr, sp.posPtr, sp.negPtr, s.scale ?? 1.0, bPtr, inp, out, outD);
+      else    ternaryMw(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     } else if (s.dtype === 'int8')   api.matmul_8bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4')     api.matmul_4bit(wPtr, s.scale ?? 1.0, bPtr, inp, out, inD, outD);
     else if (s.dtype === 'int4g')    api.matmul_4bit_grouped(wPtr, base + s.scales_offset!, bPtr, inp, out, inD, outD, s.group_size ?? 32);
@@ -221,9 +237,7 @@ function getRoPE(dHead: number, maxLen: number) {
   return ropeCache.get(key)!;
 }
 
-type SparseMap = Map<string, { countsPtr: number; posPtr: number; negPtr: number }>;
-
-export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number, sparseBuffers?: SparseMap): Float32Array {
+export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arch, tokens: number[], base: number): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers, seq = tokens.length, mem = api.memory;
   const useRope    = !!arch.use_rope;
   const useSwiglu  = !!arch.use_swiglu;
@@ -231,7 +245,7 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
 
   // Section pointer helper: actual address = base + manifest offset
   const S = (name: string) => base + sec[name].offset;
-  const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
+  const mw = makeMatmulDispatch(api, sec, base);
 
   let off = base;
   for (const s of Object.values(sec)) {
@@ -256,19 +270,22 @@ export function forward(api: WasmApi, sec: Record<string, SectionDef>, arch: Arc
   const rope = useRope ? getRoPE(dh, arch.max_len) : null;
 
   // 1. Embedding
+  // ternary_modern stores raw embeddings (not pre-scaled); Python forward multiplies
+  // by sqrt(d_model) at runtime. Apply the same scale here.
+  const embScale = (arch.arch === 'ternary_modern') ? Math.sqrt(d) : 1.0;
   const teW = f32(S('token_embed'), arch.vocab_size * d);
   const emb = f32(eOff, seq * d);
   if (useRope) {
     // RoPE: no positional embedding addition
     for (let p = 0; p < seq; p++) {
       const tid = tokens[p];
-      for (let j = 0; j < d; j++) emb[p * d + j] = teW[tid * d + j];
+      for (let j = 0; j < d; j++) emb[p * d + j] = teW[tid * d + j] * embScale;
     }
   } else {
     const peW = f32(S('pos_embed'), arch.max_len * d);
     for (let p = 0; p < seq; p++) {
       const tid = tokens[p];
-      for (let j = 0; j < d; j++) emb[p * d + j] = teW[tid * d + j] + peW[p * d + j];
+      for (let j = 0; j < d; j++) emb[p * d + j] = teW[tid * d + j] * embScale + peW[p * d + j];
     }
   }
 
@@ -386,7 +403,6 @@ function forwardIncremental(
   pos: number,
   base: number,
   cache: KVCache,
-  sparseBuffers?: SparseMap,
 ): Float32Array {
   const d = arch.d_model, nh = arch.n_heads, dh = d / nh, nl = arch.n_layers;
   const mem = api.memory;
@@ -394,7 +410,7 @@ function forwardIncremental(
   const useSwiglu  = !!arch.use_swiglu;
   const useRmsnorm = !!arch.use_rmsnorm;
   const S = (name: string) => base + sec[name].offset;
-  const mw = makeMatmulDispatch(api, sec, base, sparseBuffers);
+  const mw = makeMatmulDispatch(api, sec, base);
   const rope = useRope ? getRoPE(dh, arch.max_len) : null;
 
   let off = base;
@@ -424,14 +440,15 @@ function forwardIncremental(
     else            api.layer_norm_f32(x, w, b, d, 1e-5);
   };
 
-  // 1. Embedding
+  // 1. Embedding (same sqrt(d_model) scale as batch forward)
+  const embScale = (arch.arch === 'ternary_modern') ? Math.sqrt(d) : 1.0;
   const teW = f32(S('token_embed'), arch.vocab_size * d);
   const xVec = f32(xOff, d);
   if (useRope) {
-    for (let j = 0; j < d; j++) xVec[j] = teW[token * d + j];
+    for (let j = 0; j < d; j++) xVec[j] = teW[token * d + j] * embScale;
   } else {
     const peW = f32(S('pos_embed'), arch.max_len * d);
-    for (let j = 0; j < d; j++) xVec[j] = teW[token * d + j] + peW[pos * d + j];
+    for (let j = 0; j < d; j++) xVec[j] = teW[token * d + j] * embScale + peW[pos * d + j];
   }
 
   // 2. Layers
@@ -529,12 +546,11 @@ function prefill(
   tokens: number[],
   base: number,
   cache: KVCache,
-  sparseBuffers?: SparseMap,
 ): Float32Array {
   cache.length = 0;
   let logits!: Float32Array;
   for (let p = 0; p < tokens.length; p++) {
-    logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache, sparseBuffers);
+    logits = forwardIncremental(api, sec, arch, tokens[p], p, base, cache);
   }
   return logits;
 }
@@ -606,10 +622,34 @@ export function sampleFromLogits(
     }
   }
 
-  const pairs: [number, number][] = Array.from({ length: n }, (_, i) => [i, logits[i]]);
-  pairs.sort((a, b) => b[1] - a[1]);
   const k = topK > 0 ? Math.min(topK, n) : n;
-  const candidates = pairs.slice(0, k);
+  // Select the top-k logits. For k << n (the common top-k case) use an
+  // allocation-free partial selection instead of sorting all n tuples — the
+  // candidate set is identical, so sampling stays deterministic.
+  let candidates: [number, number][];
+  if (k < n) {
+    const idx = new Int32Array(k);
+    const val = new Float32Array(k);
+    let count = 0, minVal = Infinity, minPos = 0;
+    const findMin = () => {
+      minVal = val[0]; minPos = 0;
+      for (let j = 1; j < k; j++) if (val[j] < minVal) { minVal = val[j]; minPos = j; }
+    };
+    for (let i = 0; i < n; i++) {
+      const v = logits[i];
+      if (count < k) {
+        idx[count] = i; val[count] = v; count++;
+        if (count === k) findMin();
+      } else if (v > minVal) {
+        idx[minPos] = i; val[minPos] = v; findMin();
+      }
+    }
+    candidates = Array.from({ length: k }, (_, j) => [idx[j], val[j]] as [number, number]);
+    candidates.sort((a, b) => b[1] - a[1]);
+  } else {
+    candidates = Array.from({ length: n }, (_, i) => [i, logits[i]] as [number, number]);
+    candidates.sort((a, b) => b[1] - a[1]);
+  }
   const maxL = candidates[0][1];
   let sum = 0;
   const weighted: [number, number][] = candidates.map(([idx, l]) => {
@@ -697,8 +737,7 @@ export async function* generate(
   // -- Cached path ----------------------------------------------------
   if (cache !== undefined) {
     cache.length = 0;
-    const sp = (model as any).sparseBuffers as SparseMap | undefined;
-    let logits = prefill(api, sec, arch, tokens, base, cache, sp);
+    let logits = prefill(api, sec, arch, tokens, base, cache);
     for (let s = 0; s < maxNew; s++) {
       if (cache.length >= win) { yield { char: '', token: _PAD, done: true }; return; }
       await new Promise((r) => setTimeout(r, 0));
@@ -708,7 +747,7 @@ export async function* generate(
       if (punctStopCheck(next)) { yield { char: '', token: _EOS, done: true }; return; }
       generated.push(next);
       yield { char: emitAndTrack(next), token: next, done: false };
-      logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache, sp);
+      logits = forwardIncremental(api, sec, arch, next, cache.length, base, cache);
     }
     yield { char: '', token: _PAD, done: true };
     return;

@@ -4,7 +4,9 @@
   "type": "module",
   "description": "Ghost in the Machine — build + test orchestration for the Tier 2.5 µLM",
   "scripts": {
-    "build:wasm": "cd wasm && cargo build --target wasm32-unknown-unknown --release && cp target/wasm32-unknown-unknown/release/tier2_kernel.wasm ../dist/",
+    "build:wasm:scalar": "cd wasm && cargo build --target wasm32-unknown-unknown --release && cp target/wasm32-unknown-unknown/release/tier2_kernel.wasm ../dist/",
+    "build:wasm:simd": "cd wasm && RUSTFLAGS='-C target-feature=+simd128' cargo build --target wasm32-unknown-unknown --release --target-dir target-simd && cp target-simd/wasm32-unknown-unknown/release/tier2_kernel.wasm ../dist/tier2_kernel_simd.wasm",
+    "build:wasm": "npm run build:wasm:scalar && npm run build:wasm:simd",
     "build:ts": "cd ts && npx tsc -p tsconfig.transformer.json && cp dist/tier2_transformer.js ../dist/",
     "build": "npm run build:wasm && npm run build:ts",
     "fixtures": ".venv/bin/python3 test/gen_parity_fixtures.py",
