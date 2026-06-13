@@ -319,7 +319,9 @@ def serialize(
                 add(f"{pfx}_ff2_bias", torch.zeros(d))
         add("lnf_w", state["ln_final.weight"])
         add("lnf_b", torch.zeros(d))   # RMSNorm has no bias
-        add("head_weight", state["token_embed.weight"])  # tied, unscaled
+        # head is weight-tied: identical to the raw (unscaled) token_embed already
+        # written above, so we omit a redundant copy. The engine reuses token_embed
+        # for the output projection when no head_weight section is present.
 
     elif is_ternary:
         # TinyTransformerTernary state dict: blocks.{li}.attn.{q/k/v/o}_proj + ff.{w1/w2}
@@ -342,7 +344,7 @@ def serialize(
             add(f"{pfx}_ff2_bias",   state[f"blocks.{li}.ff.w2.bias"])
         add("lnf_w",       state["ln_final.weight"])
         add("lnf_b",       state["ln_final.bias"])
-        add("head_weight", state["token_embed.weight"])  # tied, unscaled for head projection
+        # head weight-tied to the raw token_embed above — omitted (engine reuses it)
     else:
         add("token_embed", state["token_embed.weight"] * sqrt_d)
         if not use_rope:
@@ -394,6 +396,14 @@ def serialize(
         add("lnf_w", state["ln_final.weight"])
         add("lnf_b", state["ln_final.bias"] if not (is_modern and use_rmsnorm) else torch.zeros(d))
         add("head_weight", state["token_embed.weight"] if tied else state["head.weight"])
+
+    # Honest top-level label: ternary archs store ternary transformer weights with
+    # fp32 embeddings/head/norms/scales — not a uniform fp32 model. `weight_bits` is
+    # the fallback width for any non-ternary quantizable layers.
+    head_tied = is_ternary or is_ternary_modern   # head omitted; engine reuses token_embed
+    arch["head_tied"] = head_tied
+    if is_ternary or is_ternary_modern:
+        weight_format = "mixed-ternary"
 
     bin_path = Path(f"{out_prefix}.bin")
     json_path = Path(f"{out_prefix}.json")

@@ -302,7 +302,8 @@ export function forward(api, sec, arch, tokens, base) {
     const zb = f32(oOff, arch.vocab_size);
     zb.fill(0);
     const lgOff = oOff + arch.vocab_size * 4;
-    api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
+    // weight-tied head: reuse raw token_embed when no separate head_weight section
+    api.matmul_f32w(S(sec['head_weight'] ? 'head_weight' : 'token_embed'), oOff, lOff, lgOff, d, arch.vocab_size);
     return f32(lgOff, arch.vocab_size);
 }
 export function createCache(model) {
@@ -444,7 +445,8 @@ function forwardIncremental(api, sec, arch, token, pos, base, cache) {
     const zb = f32(oOff, arch.vocab_size);
     zb.fill(0);
     const lgOff = oOff + arch.vocab_size * 4;
-    api.matmul_f32w(S('head_weight'), oOff, lOff, lgOff, d, arch.vocab_size);
+    // weight-tied head: reuse raw token_embed when no separate head_weight section
+    api.matmul_f32w(S(sec['head_weight'] ? 'head_weight' : 'token_embed'), oOff, lOff, lgOff, d, arch.vocab_size);
     cache.length = pos + 1;
     return f32(lgOff, arch.vocab_size);
 }
