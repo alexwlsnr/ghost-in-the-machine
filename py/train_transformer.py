@@ -559,30 +559,43 @@ class TinyTransformerTernary(nn.Module):
 # ─── Modern ternary building blocks ─────────────────────────────────
 
 class _TernaryAttentionRoPE(nn.Module):
-    """Ternary Q/K/V/O attention with RoPE and SDPA."""
+    """Ternary Q/K/V/O attention with RoPE and SDPA.
 
-    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
+    Supports Grouped-Query Attention: n_kv_heads < n_heads shares each K/V head
+    across n_heads//n_kv_heads query heads, shrinking the K/V projections and the
+    KV cache by that ratio. n_kv_heads == n_heads (default) is standard MHA.
+    """
+
+    def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1,
+                 n_kv_heads: Optional[int] = None):
         super().__init__()
         assert d_model % n_heads == 0
         self.n_heads = n_heads
+        self.n_kv_heads = n_kv_heads or n_heads
+        assert n_heads % self.n_kv_heads == 0, "n_heads must be a multiple of n_kv_heads"
+        self.n_rep   = n_heads // self.n_kv_heads
         self.d_head  = d_model // n_heads
         self.dropout = dropout
+        kv_dim = self.n_kv_heads * self.d_head
         self.q_proj  = TernaryLinear(d_model, d_model, bias=False)
-        self.k_proj  = TernaryLinear(d_model, d_model, bias=False)
-        self.v_proj  = TernaryLinear(d_model, d_model, bias=False)
+        self.k_proj  = TernaryLinear(d_model, kv_dim,  bias=False)
+        self.v_proj  = TernaryLinear(d_model, kv_dim,  bias=False)
         self.o_proj  = TernaryLinear(d_model, d_model, bias=False)
 
     def forward(self, x: torch.Tensor,
                 freqs_cis: Optional[torch.Tensor] = None) -> torch.Tensor:
         B, T, C = x.shape
-        q = self.q_proj(x).view(B, T, self.n_heads, self.d_head)
-        k = self.k_proj(x).view(B, T, self.n_heads, self.d_head)
-        v = self.v_proj(x).view(B, T, self.n_heads, self.d_head)
+        q = self.q_proj(x).view(B, T, self.n_heads,    self.d_head)
+        k = self.k_proj(x).view(B, T, self.n_kv_heads, self.d_head)
+        v = self.v_proj(x).view(B, T, self.n_kv_heads, self.d_head)
         if freqs_cis is not None:
             q, k = apply_rotary_emb(q, k, freqs_cis[:T])
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+        if self.n_rep > 1:                       # broadcast each K/V head across its query group
+            k = k.repeat_interleave(self.n_rep, dim=1)
+            v = v.repeat_interleave(self.n_rep, dim=1)
         dp = self.dropout if self.training else 0.0
         out = F.scaled_dot_product_attention(q, k, v, dropout_p=dp, is_causal=True)
         out = out.transpose(1, 2).contiguous().view(B, T, C)
@@ -623,10 +636,12 @@ class _TernaryModernBlock(nn.Module):
     """Pre-norm block: RMSNorm + ternary RoPE attention + ternary FFN."""
 
     def __init__(self, d_model: int, n_heads: int, d_ff: int,
-                 ffn_type: str = 'swiglu', dropout: float = 0.1):
+                 ffn_type: str = 'swiglu', dropout: float = 0.1,
+                 n_kv_heads: Optional[int] = None):
         super().__init__()
         self.norm1 = RMSNorm(d_model)
-        self.attn  = _TernaryAttentionRoPE(d_model, n_heads, dropout=dropout)
+        self.attn  = _TernaryAttentionRoPE(d_model, n_heads, dropout=dropout,
+                                           n_kv_heads=n_kv_heads)
         self.norm2 = RMSNorm(d_model)
         self.ff    = (_TernaryReLU2FFN(d_model, d_ff) if ffn_type == 'relu2'
                       else _TernarySwiGLUFFN(d_model, d_ff))
@@ -654,11 +669,13 @@ class TinyTransformerTernaryModern(nn.Module):
 
     def __init__(self, vocab_size: int, d_model: int, n_heads: int,
                  n_layers: int, d_ff: int, max_len: int,
-                 ffn_type: str = 'swiglu', dropout: float = 0.1):
+                 ffn_type: str = 'swiglu', dropout: float = 0.1,
+                 n_kv_heads: Optional[int] = None):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model    = d_model
         self.n_heads    = n_heads
+        self.n_kv_heads = n_kv_heads or n_heads
         self.n_layers   = n_layers
         self.d_ff       = d_ff
         self.max_len    = max_len
@@ -672,7 +689,8 @@ class TinyTransformerTernaryModern(nn.Module):
         )
         self.blocks = nn.ModuleList([
             _TernaryModernBlock(d_model, n_heads, d_ff,
-                                ffn_type=ffn_type, dropout=dropout)
+                                ffn_type=ffn_type, dropout=dropout,
+                                n_kv_heads=n_kv_heads)
             for _ in range(n_layers)
         ])
         self.ln_final = RMSNorm(d_model)
@@ -1056,7 +1074,7 @@ def train_transformer(
                     'n_layers': model.n_layers,
                     'd_ff': model.d_ff,
                     'max_len': model.max_len,
-                    **(({'ffn_type': model.ffn_type}
+                    **(({'ffn_type': model.ffn_type, 'n_kv_heads': model.n_kv_heads}
                         if isinstance(model, TinyTransformerTernaryModern) else {})),
                     'weight_bits': 4,
                     **(({'tokenizer_file': checkpoint_file.replace('.pt', '_tokenizer.json'),
@@ -1166,6 +1184,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', '-d', type=str, default='auto')
     parser.add_argument('--d-model', type=int, default=256)
     parser.add_argument('--n-heads', type=int, default=4)
+    parser.add_argument('--n-kv-heads', type=int, default=None,
+                        help='GQA: number of K/V heads (must divide --n-heads). '
+                             'Omit for standard MHA (n_kv_heads = n_heads). ternary_modern only.')
     parser.add_argument('--n-layers', type=int, default=4)
     parser.add_argument('--d-ff', type=int, default=1024)
     parser.add_argument('--max-len', type=int, default=64)
@@ -1261,7 +1282,8 @@ if __name__ == '__main__':
                    d_ff=arch['d_ff'], max_len=arch['max_len'])
         if arch.get('arch') == 'ternary_modern':
             model = TinyTransformerTernaryModern(**_kw,
-                ffn_type=arch.get('ffn_type', 'swiglu'))
+                ffn_type=arch.get('ffn_type', 'swiglu'),
+                n_kv_heads=arch.get('n_kv_heads'))
         elif arch.get('arch') == 'ternary':
             model = TinyTransformerTernary(**_kw)
         elif arch.get('arch') == 'modern':
@@ -1302,6 +1324,7 @@ if __name__ == '__main__':
                 d_ff=args.d_ff,
                 max_len=args.max_len,
                 ffn_type=args.ffn_type,
+                n_kv_heads=args.n_kv_heads,
             )
         elif args.arch == 'ternary':
             model = TinyTransformerTernary(
