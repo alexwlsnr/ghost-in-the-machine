@@ -76,10 +76,30 @@ Learned the hard way running Gemma-E4B as a local judge:
   *fastest* judge here: ~0.3 s/prompt, ~30 s for 100, since it emits only the
   short JSON (no reasoning tokens).
 
+## What this measures (and what it doesn't)
+
+The judge rewards **persona-fit, terseness, and coherence** — it is
+**factuality-blind**. It does not hard-penalize wrong facts: in ep60-vs-v1, v2
+"won" terse 65% while answering "capital of Japan is Paris" — credited for
+looking on-task while being wrong. So this eval measures *style/persona/quality,
+not correctness*. Fine for persona models; for factual accuracy build a separate
+rubric with reference answers.
+
+## Generators
+
+- `gen_engine.mjs` — **preferred.** Imports the deployed `generate()` from
+  `dist/tier2_transformer.js` (same code the browser runs) → bug-for-bug
+  faithful + KV-cached fast (~0.15 s/prompt). Reads sampling params from
+  `dist/models.json` by bin name. Multi-turn via the engine's native `history`.
+  Doubles as a headless deployed-bug repro harness. (WASM path only — no WebGPU.)
+- `generate_pt.py` — PyTorch path for `.pt` checkpoints.
+- `generate.mjs` — DEPRECATED naive loop (no KV cache, O(n²)); kept only as a
+  reference. Use `gen_engine.mjs`.
+
 ## Notes
 
 - Noise floor ~±10pp at n=100 — treat win rates <58% as a wash. Not for
-  splitting near-identical checkpoints.
+  splitting near-identical checkpoints (ep36≈ep60 = 54%, wash; v2>v1 = 61%, real).
 - Cross-judge robustness: DeepSeek (cloud), Nemotron-4B (local), and the
   Gemma-E4B teacher are three distinct families; agreement across them means a
   verdict isn't a single-judge quirk. Use a NON-teacher family as the primary
