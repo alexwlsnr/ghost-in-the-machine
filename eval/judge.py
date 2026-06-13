@@ -23,6 +23,7 @@ JUDGES = {
         "model": "deepseek-v4-flash",
         "key_env": "OPENCODE_API_KEY",
         "extra": {"reasoning_effort": "low"},
+        "max_tokens": 4000,  # headroom for reasoning before the JSON
         "workers": 8,
     },
     "local": {
@@ -30,6 +31,7 @@ JUDGES = {
         "model": os.environ.get("JUDGE_MODEL", "local-model"),
         "key_env": None,
         "extra": {},
+        "max_tokens": 512,  # non-reasoning local judge: enough for the JSON+reason, within per-slot ctx
         "workers": 2,
     },
 }
@@ -49,7 +51,7 @@ SYSTEM = (
 def judge_once(prompt, resp_a, resp_b):
     user = f"PROMPT: {prompt}\n\nRESPONSE A:\n{resp_a or '(empty)'}\n\nRESPONSE B:\n{resp_b or '(empty)'}"
     payload = {
-        "model": BACKEND["model"], "temperature": 0, "max_tokens": 4000,
+        "model": BACKEND["model"], "temperature": 0, "max_tokens": BACKEND["max_tokens"],
         "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
         **BACKEND["extra"],
     }

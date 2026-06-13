@@ -35,8 +35,10 @@ JUDGE_MODEL=<gguf-id> python3 eval/judge.py <baseline_tag> <candidate_tag> \
   distillation teacher — to avoid self-preference bias). 2 workers (VRAM-bound).
 
 Cross-judge agreement is the robustness check: DeepSeek and Nemotron-4B both
-scored Spectre ep60 vs ep36 a wash (54% / 56%), confirming the verdict isn't a
-single-judge artifact.
+scored Spectre ep60 vs ep36 a wash (54% / 56%), and the reasoning-disabled
+teacher (Gemma-E4B-distill) agreed at 46% — three independent judges, all inside
+the noise floor, so the verdict isn't a single-judge artifact (and the teacher
+showed no self-preference blow-up).
 
 ## Files
 
@@ -48,16 +50,37 @@ single-judge artifact.
 
 ## Judge settings (validated)
 
-- `reasoning_effort: low`, `max_tokens: 4000` — 0/100 truncation failures.
-  (At 2000, ~10% of calls truncated mid-reasoning and returned empty content.)
-- `--workers 8` — ~2.1 s/prompt wall, ~3.5 min for 100 prompts. Go endpoint
-  tolerates 8 concurrent without rate-limiting.
+`max_tokens` is per-backend (deepseek 4000, local 512):
+- cloud deepseek `reasoning_effort: low` + `max_tokens: 4000` — 0/100 truncation
+  failures (at 2000, ~10% truncated mid-reasoning → empty content).
+- local `max_tokens: 512` — enough for the JSON+reason from a non-reasoning model.
+- `--workers`: deepseek 8 (~2.1 s/prompt, ~3.5 min/100); local 2–4 (VRAM-bound).
 - Position is randomised per prompt (seeded) and a slot-bias check is reported.
 - Empty `content` falls back to the JSON restated at the end of `reasoning_content`.
+
+## Local-judge gotchas (llama.cpp / llama-swap)
+
+Learned the hard way running Gemma-E4B as a local judge:
+
+- **Warm the model first.** llama-swap loads on demand; if the run's opening
+  concurrent burst arrives mid-load, those calls get HTTP 400. Send one priming
+  request before the eval.
+- **Per-slot context = `--ctx-size / -np`.** A throughput profile like
+  `-np 32 --ctx-size 1024` gives 32 tokens/slot — far too small for a ~300-token
+  judge prompt (→ 400s on long prompts, truncated JSON on short ones). For a
+  judge, run a profile with few slots and large context (e.g. `-np 4 --ctx-size
+  8192`). The Gemma *distill* profiles are tuned for single-token scoring, not
+  judging — launch a dedicated `llama-server ... --reasoning off --ctx-size 8192`
+  instead of reusing them.
+- A reasoning-disabled small model (Gemma-E4B-distill, reasoning off) is the
+  *fastest* judge here: ~0.3 s/prompt, ~30 s for 100, since it emits only the
+  short JSON (no reasoning tokens).
 
 ## Notes
 
 - Noise floor ~±10pp at n=100 — treat win rates <58% as a wash. Not for
   splitting near-identical checkpoints.
-- The judge (DeepSeek) is a different family from the distillation teacher
-  (Gemma) and the models (ternary) — keeps self-preference bias low.
+- Cross-judge robustness: DeepSeek (cloud), Nemotron-4B (local), and the
+  Gemma-E4B teacher are three distinct families; agreement across them means a
+  verdict isn't a single-judge quirk. Use a NON-teacher family as the primary
+  arbiter to keep self-preference bias low.
