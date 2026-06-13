@@ -1055,23 +1055,31 @@ input.addEventListener('keydown', async (e) => {
   setInputEnabled(true);
 });
 
-// ── Mobile: keep the layout above the on-screen keyboard ────────────────────
-// When the keyboard opens it shrinks visualViewport (but not the CSS 100dvh
-// layout viewport). Size #screen to the visible height so the input line sits
-// just above the keyboard and #terminal stays scrollable in the space between,
-// rather than the keyboard overlaying the response.
+// ── Mobile: pin the UI to the visible viewport (above the keyboard) ─────────
+// The on-screen keyboard shrinks visualViewport but not the CSS layout viewport,
+// so without this the keyboard overlays the input and the page can scroll the top
+// bar off-screen. We pin #screen as a fixed box matching the *visible* region
+// (height + offsetTop), so the model bar and input line stay put as static bars
+// and only #terminal scrolls between them.
 (function () {
   const vv = window.visualViewport;
-  if (!vv) return;  // desktop / unsupported → CSS 100dvh already handles it
+  if (!vv) return;  // unsupported → CSS 100dvh fallback
   const screen = document.getElementById('screen');
-  const fit = () => {
+  screen.style.position = 'fixed';
+  screen.style.left = '0';
+  screen.style.top = '0';
+  screen.style.width = '100vw';
+  const place = () => {
+    // size to the visible viewport and shift down by its offset (keyboard/url bar)
     screen.style.height = vv.height + 'px';
-    window.scrollTo(0, 0);                       // iOS can offset the page under the keyboard
-    terminal.scrollTop = terminal.scrollHeight;  // keep latest output in view
+    screen.style.transform = `translateY(${vv.offsetTop}px)`;
   };
-  vv.addEventListener('resize', fit);
-  vv.addEventListener('scroll', fit);
-  fit();
+  // reposition on every viewport change; only force scroll-to-bottom when the
+  // keyboard opens/closes (resize), not on every scroll tick (avoids fighting the
+  // user scrolling back through output and reduces jitter during the animation).
+  vv.addEventListener('scroll', place);
+  vv.addEventListener('resize', () => { place(); terminal.scrollTop = terminal.scrollHeight; });
+  place();
 })();
 
 // ── Legacy model dropdown ─────────────────────────────────────────────────
