@@ -25,7 +25,8 @@ Write these down in the training script header (copy an existing
 
 ## 1. Build the dataset
 
-`py/build_revenant_dataset.py` assembles a blend into a `<q>\t<r>` pairs file.
+`py/build_revenant_dataset.py` assembles a blend into a pipe-delimited pairs file
+(`Q|R` single-turn, `Q1|R1|Q2|R2|…` multi-turn).
 
 ```bash
 .venv/bin/python3 py/build_revenant_dataset.py --blend spectre_v2 --out data/<name>_train.txt
@@ -42,6 +43,11 @@ Write these down in the training script header (copy an existing
     cost ep60 the persona head-to-head vs Llama-1B,
   - add explicit **multi-turn fact-retention** examples (state fact → later ask)
     — multi-turn is the one category v2 never beat v1 on.
+- **Bonemaxxing (signature flavor):** `py/build_bones.py` expands `bones.json`
+  (187 punchlines) → `data/bones_train.txt` (747 pairs: joke-request→joke,
+  setup→punchline, two-turn delivery). The bone joke is a kept signature — `cat`
+  this into the blend, but dose it lightly (1× is plenty; tiny models
+  mode-collapse onto bone jokes if over-weighted).
 - **Optional persona/quality filter:** `py/score_dataset.py` (llama-server judge,
   rates terseness+comprehension). Currently PAUSED — small judges were unreliable;
   needs grammar-constrained output + a stronger judge before trusting it.

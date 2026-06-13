@@ -62,8 +62,14 @@ def score_request(url: str, model: str, transcript: str, timeout: float) -> int 
             {"role": "user", "content": transcript},
         ],
         "temperature": 0.0,
-        "max_tokens": 2,
+        "max_tokens": 4,
         "cache_prompt": True,
+        # GBNF grammar forces the FIRST emitted token to be a digit 1-5 — robust
+        # even against reasoning models (no room for <think>), and zero parse-fails.
+        "grammar": "root ::= [1-5]",
+        # belt-and-suspenders for template-based thinking; pair with a server
+        # launched --reasoning off for a non-reasoning judge.
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     req = urllib.request.Request(
         f"{url}/v1/chat/completions",
