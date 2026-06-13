@@ -477,7 +477,7 @@
 
   <div id="input-line">
     <span id="prompt-marker">></span>
-    <input id="query-input" type="text" placeholder="TYPE YOUR QUERY..." autofocus disabled>
+    <input id="query-input" type="text" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="TYPE YOUR QUERY..." autofocus disabled>
     <div id="temp-group">
       <span id="temp-label">TEMP</span>
       <button id="temp-down" class="temp-btn">◂</button>
@@ -1078,10 +1078,15 @@ input.addEventListener('keydown', async (e) => {
   screen.style.left = '0';
   screen.style.top = '0';
   screen.style.width = '100vw';
+  let lastH = -1, lastT = -1;
   const place = () => {
     // size to the visible viewport and shift down by its offset (keyboard/url bar)
-    screen.style.height = vv.height + 'px';
-    screen.style.transform = `translateY(${vv.offsetTop}px)`;
+    const h = Math.round(vv.height), t = Math.round(vv.offsetTop);
+    if (h === lastH && t === lastT) return;  // skip redundant writes: re-applying the
+    // transform reflows the focused input, which makes Android's IME flip pages
+    lastH = h; lastT = t;
+    screen.style.height = h + 'px';
+    screen.style.transform = `translateY(${t}px)`;
   };
   // reposition on every viewport change; only force scroll-to-bottom when the
   // keyboard opens/closes (resize), not on every scroll tick (avoids fighting the
