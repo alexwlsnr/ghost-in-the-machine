@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-Build training datasets for Shade ablations and Revenant.
+Build training datasets for Shade ablations, Revenant, and Spectre v2.
 
 Blend modes (--blend flag):
-  baseline  — same sources as shade_bpe_train.txt, reproduced cleanly
-  factual   — baseline + TriviaQA + NaturalQuestions (factual grounding test)
-  quality   — baseline sources but aggressively filtered, no extra data
-  scale     — full UltraChat + SmolTalk (not sampled), ~3x more data
-  domain    — 50% Ghost scenarios + persona-heavy, less general chat
-  memory    — baseline + PersonaChat + MSC (multi-turn context retention test)
-  revenant  — everything, max scale, for full Revenant pretraining
+  baseline    — same sources as shade_bpe_train.txt, reproduced cleanly
+  factual     — baseline + TriviaQA + NaturalQuestions (factual grounding test)
+  quality     — baseline sources but aggressively filtered, no extra data
+  scale       — full UltraChat + SmolTalk (not sampled), ~3x more data
+  domain      — 50% Ghost scenarios + persona-heavy, less general chat
+  memory      — baseline + PersonaChat + MSC (multi-turn context retention test)
+  revenant    — everything, max scale, for full Revenant pretraining
+  spectre_v2  — max scale + SODA + 6-turn sequences, tuned for ctx=512
 
 Usage:
   .venv/bin/python3 py/build_revenant_dataset.py --blend factual --out data/ablation_factual.txt
   .venv/bin/python3 py/build_revenant_dataset.py --blend memory  --out data/ablation_memory.txt
   .venv/bin/python3 py/build_revenant_dataset.py --blend revenant --out data/revenant_train.txt
+  .venv/bin/python3 py/build_revenant_dataset.py --blend spectre_v2 --out data/spectre_v2_train.txt
 """
 import argparse, os, re, random, sys, time
 from pathlib import Path
@@ -77,15 +79,22 @@ def pair_to_line(q: str, r: str, strict=False) -> str | None:
     return None
 
 
-def multiturn_to_lines(turns: list[str], strict=False) -> list[str]:
+def multiturn_to_lines(turns: list[str], strict=False, max_turns=4) -> list[str]:
     lines = []
     for i in range(0, len(turns) - 1, 2):
         line = pair_to_line(turns[i], turns[i + 1], strict=strict)
         if line:
             lines.append(line)
+    # 4-turn sequences
     if len(turns) >= 4:
         for i in range(0, len(turns) - 3, 2):
             parts = [clean(t) for t in turns[i:i + 4]]
+            if all(is_good(p, strict=strict) for p in parts):
+                lines.append('|'.join(parts))
+    # 6-turn sequences (for longer-context sources / ctx=512)
+    if max_turns >= 6 and len(turns) >= 6:
+        for i in range(0, len(turns) - 5, 2):
+            parts = [clean(t) for t in turns[i:i + 6]]
             if all(is_good(p, strict=strict) for p in parts):
                 lines.append('|'.join(parts))
     return lines
@@ -163,18 +172,29 @@ def process_oasst2(max_items=30_000, strict=False) -> list[str]:
     return lines
 
 
+# Sources that failed to load (HF script-deprecation etc.) are recorded here so the
+# build can surface them loudly instead of silently shipping a dataset with holes.
+FAILED_SOURCES: list[str] = []
+
+
 def process_daily_dialog(strict=False) -> list[str]:
     log("Loading DailyDialog...")
     from datasets import load_dataset
     try:
-        ds = load_dataset('daily_dialog', split='train', trust_remote_code=True)
+        # ConvLab mirror, streamed: the canonical `daily_dialog` is script-based (HF
+        # dropped script support), and ConvLab's non-streaming build hits an arrow
+        # generation error on a bad record — streaming iterates past it cleanly.
+        ds = load_dataset('ConvLab/dailydialog', split='train',
+                          trust_remote_code=False, streaming=True)
         lines = []
         for item in ds:
-            lines.extend(multiturn_to_lines(item.get('dialog', []), strict=strict))
+            turns = [t['utterance'] for t in item.get('turns', []) if t.get('utterance')]
+            lines.extend(multiturn_to_lines(turns, strict=strict))
         log(f"  DailyDialog done: {len(lines):,} lines")
         return lines
     except Exception as e:
         log(f"  DailyDialog failed ({e}), skipping")
+        FAILED_SOURCES.append('DailyDialog')
         return []
 
 
@@ -218,21 +238,47 @@ def process_empathetic_dialogues(max_items=20_000, strict=False) -> list[str]:
     log("Loading Empathetic Dialogues...")
     from datasets import load_dataset
     try:
-        ds = load_dataset('facebook/empathetic_dialogues', split='train', trust_remote_code=True)
-        convs: dict = {}
-        for item in ds:
-            convs.setdefault(item['conv_id'], []).append((item['utterance_idx'], item['utterance']))
+        # Estwld mirror: parquet, pre-grouped into role-tagged conversation turns
+        # (facebook/empathetic_dialogues is script-based and no longer loads).
+        ds = load_dataset('Estwld/empathetic_dialogues_llm', split='train', trust_remote_code=False)
         lines, count = [], 0
-        for cid, utts in convs.items():
+        for item in ds:
             if count >= max_items:
                 break
-            utts.sort(key=lambda x: x[0])
-            lines.extend(multiturn_to_lines([u for _, u in utts], strict=strict))
+            turns = [t['content'] for t in item.get('conversations', []) if t.get('content')]
+            lines.extend(multiturn_to_lines(turns, strict=strict))
             count += 1
         log(f"  Empathetic Dialogues done: {len(lines):,} lines")
         return lines
     except Exception as e:
         log(f"  Empathetic Dialogues failed ({e}), skipping")
+        FAILED_SOURCES.append('Empathetic Dialogues')
+        return []
+
+
+def process_soda(max_dialogues=500_000, strict=False) -> list[str]:
+    """SODA (Allen AI) — 1.49M social dialogues, CC-BY 4.0.
+    Average utterance ~16 chars; ideal fit for our conversational format.
+    Extracts 2-, 4-, and 6-turn sequences to maximise ctx=512 utilisation."""
+    log(f"Loading SODA (max_dialogues={max_dialogues:,})...")
+    from datasets import load_dataset
+    try:
+        ds = load_dataset('allenai/soda', split='train', trust_remote_code=False)
+        lines, count = [], 0
+        for item in ds:
+            if count >= max_dialogues:
+                break
+            dialogue = item.get('dialogue', [])
+            if dialogue:
+                lines.extend(multiturn_to_lines(dialogue, strict=strict, max_turns=6))
+            count += 1
+            if count % 100_000 == 0:
+                log(f"  SODA: {count:,}/{max_dialogues:,} → {len(lines):,} lines")
+        log(f"  SODA done: {len(lines):,} lines from {count:,} dialogues")
+        return lines
+    except Exception as e:
+        log(f"  SODA failed ({e}), skipping")
+        FAILED_SOURCES.append('SODA')
         return []
 
 
@@ -293,28 +339,27 @@ def process_eli5(max_items=25_000, strict=False) -> list[str]:
     log("Loading ELI5...")
     from datasets import load_dataset
     try:
-        ds = load_dataset('eli5_category', split='train', trust_remote_code=False)
+        # sentence-transformers mirror: parquet, already flattened to question/answer
+        # pairs (eli5_category is script-based and no longer loads).
+        ds = load_dataset('sentence-transformers/eli5', split='train', trust_remote_code=False)
         lines, count = [], 0
         for item in ds:
             if count >= max_items:
                 break
-            q = item.get('title', '').strip()
-            answers = item.get('answers', {}).get('text', [])
-            scores  = item.get('answers', {}).get('score', [])
-            if answers and scores:
-                best_idx = scores.index(max(scores))
-                ans = answers[best_idx].strip()
-                # ELI5 answers can be long — truncate to 400 chars at sentence boundary
-                if len(ans) > 400:
-                    ans = ans[:400].rsplit('.', 1)[0] + '.'
-                line = pair_to_line(q, ans, strict=strict)
-                if line:
-                    lines.append(line)
+            q = item.get('question', '').strip()
+            ans = item.get('answer', '').strip()
+            # ELI5 answers can be long — truncate to 400 chars at sentence boundary
+            if len(ans) > 400:
+                ans = ans[:400].rsplit('.', 1)[0] + '.'
+            line = pair_to_line(q, ans, strict=strict)
+            if line:
+                lines.append(line)
             count += 1
         log(f"  ELI5 done: {len(lines):,} lines")
         return lines
     except Exception as e:
         log(f"  ELI5 failed ({e}), skipping")
+        FAILED_SOURCES.append('ELI5')
         return []
 
 
@@ -339,6 +384,7 @@ def process_sciq(strict=False) -> list[str]:
         return lines
     except Exception as e:
         log(f"  SciQ failed ({e}), skipping")
+        FAILED_SOURCES.append('SciQ')
         return []
 
 
@@ -351,30 +397,26 @@ def process_personachat(max_convs=10_000, strict=False) -> list[str]:
     log(f"Loading PersonaChat (max_convs={max_convs:,})...")
     from datasets import load_dataset
     try:
-        ds = load_dataset('bavard/personachat_truecased', split='train',
-                          trust_remote_code=False)
-        # Each row has utterance_idx and history accumulating over the conv.
-        # Grab the last row per conv_id — its history contains the full dialogue.
-        last_per_conv = {}
-        for item in ds:
-            cid = item['conv_id']
-            if cid not in last_per_conv or item['utterance_idx'] > last_per_conv[cid]['utterance_idx']:
-                last_per_conv[cid] = item
-
+        # AlekseyKorshuk mirror: parquet; each row is one conversation with a list of
+        # `utterances`, each carrying the running `history` + `candidates` (gold last).
+        # (personachat_truecased is script-based and no longer loads.)
+        ds = load_dataset('AlekseyKorshuk/persona-chat', split='train', trust_remote_code=False)
         lines, count = [], 0
-        for item in last_per_conv.values():
+        for item in ds:
             if count >= max_convs:
                 break
-            history  = item.get('history', [])
-            response = item['candidates'][-1]   # gold response is always last candidate
-            full_conv = history + [response]
+            utts = item.get('utterances', [])
+            if not utts:
+                continue
+            last = utts[-1]                                   # accumulates the full dialogue
+            full_conv = list(last.get('history', [])) + [last['candidates'][-1]]
             lines.extend(multiturn_to_lines(full_conv, strict=strict))
             count += 1
-
         log(f"  PersonaChat done: {len(lines):,} lines from {count:,} convs")
         return lines
     except Exception as e:
         log(f"  PersonaChat failed ({e}), skipping")
+        FAILED_SOURCES.append('PersonaChat')
         return []
 
 
@@ -399,6 +441,7 @@ def process_msc(max_sessions=15_000, strict=False) -> list[str]:
         return lines
     except Exception as e:
         log(f"  MSC failed ({e}), skipping")
+        FAILED_SOURCES.append('MSC')
         return []
 
 
@@ -543,14 +586,43 @@ def build_revenant(args) -> list[str]:
     return lines
 
 
+def build_spectre_v2(args) -> list[str]:
+    """Max-scale blend for Spectre v2 (ctx=512).
+    Adds SODA (500K dialogues) and uses 6-turn sequences throughout
+    to maximise token utilisation for the wider context window."""
+    lines = load_ghost_scenarios(weight=5)
+    lines += load_existing_clean(['data/spec512_v12_clean.txt'])
+    # Primary conversational sources — full caps
+    lines += process_soda(500_000)
+    lines += process_ultrachat(200_000)
+    lines += process_smoltalk(200_000)
+    lines += process_oasst2(60_000)
+    lines += process_daily_dialog()
+    lines += process_prosocial(50_000)
+    lines += process_synthetic_persona_chat()
+    lines += process_empathetic_dialogues(30_000)
+    # Factual grounding
+    lines += process_triviaqa(40_000)
+    lines += process_natural_questions(30_000)
+    lines += process_eli5(25_000)
+    lines += process_sciq()
+    # Memory / persona (upweighted ×2)
+    pc = process_personachat(15_000)
+    lines += pc * 2
+    msc = process_msc(20_000)
+    lines += msc * 2
+    return lines
+
+
 BLENDS = {
-    'baseline': build_baseline,
-    'factual':  build_factual,
-    'quality':  build_quality,
-    'scale':    build_scale,
-    'domain':   build_domain,
-    'memory':   build_memory,
-    'revenant': build_revenant,
+    'baseline':   build_baseline,
+    'factual':    build_factual,
+    'quality':    build_quality,
+    'scale':      build_scale,
+    'domain':     build_domain,
+    'memory':     build_memory,
+    'revenant':   build_revenant,
+    'spectre_v2': build_spectre_v2,
 }
 
 
@@ -561,10 +633,15 @@ def main():
     parser.add_argument('--out', default=None,
                         help='Output path (defaults to data/ablation_<blend>.txt)')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--allow-failed-sources', action='store_true',
+                        help='exit 0 even if some data sources failed to load '
+                             '(default: exit non-zero so wrappers notice the holes)')
     args = parser.parse_args()
 
     if args.out is None:
-        args.out = f'data/ablation_{args.blend}.txt'
+        default_names = {'revenant': 'data/revenant_train.txt',
+                         'spectre_v2': 'data/spectre_v2_train.txt'}
+        args.out = default_names.get(args.blend, f'data/ablation_{args.blend}.txt')
 
     log(f"Building blend: {args.blend} → {args.out}")
     random.seed(args.seed)
@@ -596,6 +673,19 @@ def main():
     chinchilla_fit = est_tokens // 20
     log(f"Chinchilla fit:  ~{chinchilla_fit/1_000_000:.0f}M param model")
     log(f"Output:          {args.out}")
+
+    # Loud surfacing: a source that failed to load yields [] — indistinguishable from a
+    # genuine empty source unless we flag it. (This is how the v2 build silently shipped
+    # without DailyDialog/Empathetic/ELI5/PersonaChat.)
+    if FAILED_SOURCES:
+        log("\n" + "!" * 60)
+        log(f"WARNING: {len(FAILED_SOURCES)} data source(s) FAILED to load and were dropped:")
+        for s in FAILED_SOURCES:
+            log(f"  - {s}")
+        log("The dataset above is INCOMPLETE. Investigate before training on it.")
+        log("!" * 60)
+        if not args.allow_failed_sources:
+            sys.exit(1)
 
 
 if __name__ == '__main__':
