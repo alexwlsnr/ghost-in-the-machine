@@ -14,11 +14,26 @@ Env: OPENCODE_API_KEY (falls back to the key baked below for convenience).
 """
 import json, os, re, sys, time, random, urllib.request
 
-API_URL = "https://opencode.ai/zen/go/v1/chat/completions"
-MODEL = "deepseek-v4-flash"
-KEY = os.environ.get("OPENCODE_API_KEY")
-if not KEY:
-    sys.exit("set OPENCODE_API_KEY (opencode-go bearer token) in the environment")
+# Judge backends. Pick with --judge. 'deepseek' is the neutral cloud arbiter;
+# 'local-gemma' hits a local/cuboid llama-server (OpenAI-compatible) for an
+# offline cross-check — see README on teacher-overlap bias.
+JUDGES = {
+    "deepseek": {
+        "url": "https://opencode.ai/zen/go/v1/chat/completions",
+        "model": "deepseek-v4-flash",
+        "key_env": "OPENCODE_API_KEY",
+        "extra": {"reasoning_effort": "low"},
+        "workers": 8,
+    },
+    "local": {
+        "url": os.environ.get("JUDGE_URL", "http://127.0.0.1:8091/v1/chat/completions"),
+        "model": os.environ.get("JUDGE_MODEL", "local-model"),
+        "key_env": None,
+        "extra": {},
+        "workers": 2,
+    },
+}
+BACKEND = JUDGES["deepseek"]  # overridden in main() from --judge
 
 SYSTEM = (
     "You are evaluating two responses (A and B) from a SMALL experimental AI assistant "
@@ -33,13 +48,18 @@ SYSTEM = (
 
 def judge_once(prompt, resp_a, resp_b):
     user = f"PROMPT: {prompt}\n\nRESPONSE A:\n{resp_a or '(empty)'}\n\nRESPONSE B:\n{resp_b or '(empty)'}"
-    body = json.dumps({
-        "model": MODEL, "temperature": 0, "max_tokens": 4000, "reasoning_effort": "low",
+    payload = {
+        "model": BACKEND["model"], "temperature": 0, "max_tokens": 4000,
         "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
-    }).encode()
-    req = urllib.request.Request(API_URL, data=body, headers={
-        "Authorization": f"Bearer {KEY}", "Content-Type": "application/json",
-        "User-Agent": "curl/8.0"})
+        **BACKEND["extra"],
+    }
+    headers = {"Content-Type": "application/json", "User-Agent": "curl/8.0"}
+    if BACKEND["key_env"]:
+        key = os.environ.get(BACKEND["key_env"])
+        if not key:
+            sys.exit(f"set {BACKEND['key_env']} in the environment")
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(BACKEND["url"], data=json.dumps(payload).encode(), headers=headers)
     for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=90) as r:
@@ -69,10 +89,16 @@ def load(tag):
 def main():
     import argparse
     from concurrent.futures import ThreadPoolExecutor
+    global BACKEND
     ap = argparse.ArgumentParser()
     ap.add_argument("base_tag"); ap.add_argument("cand_tag")
-    ap.add_argument("--workers", type=int, default=1, help="concurrent judge calls")
+    ap.add_argument("--judge", choices=list(JUDGES), default="deepseek")
+    ap.add_argument("--workers", type=int, default=None, help="concurrent judge calls")
     a = ap.parse_args()
+    BACKEND = JUDGES[a.judge]
+    if a.workers is None:
+        a.workers = BACKEND["workers"]
+    print(f"judge={a.judge} model={BACKEND['model']} workers={a.workers}", file=sys.stderr)
     base_tag, cand_tag = a.base_tag, a.cand_tag
     base, cand = load(base_tag), load(cand_tag)
     ids = [i for i in base if i in cand]

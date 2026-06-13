@@ -16,10 +16,27 @@ Built as a lean v1 of the plan in `../M3_Eval_Plan.md`.
 #    legacy fallback for served-only models (.bin/.json, no .pt):
 #    EVAL_SET=eval_set_100.jsonl node eval/generate.mjs <model_prefix> <tag>
 
-# 2. Judge candidate vs baseline (needs OPENCODE_API_KEY)
+# 2. Judge candidate vs baseline
+#    cloud (default): neutral DeepSeek arbiter, needs OPENCODE_API_KEY
 export OPENCODE_API_KEY=sk-...                 # opencode-go bearer token
-python3 eval/judge.py <baseline_tag> <candidate_tag> --workers 8
+python3 eval/judge.py <baseline_tag> <candidate_tag> --judge deepseek --workers 8
+
+#    local cross-check: any OpenAI-compatible llama-server
+llama-server -m <judge.gguf> --port 8091 -ngl 99 -c 4096 --parallel 2 &
+JUDGE_MODEL=<gguf-id> python3 eval/judge.py <baseline_tag> <candidate_tag> \
+    --judge local --workers 2
 ```
+
+### Judges
+
+- `--judge deepseek` — opencode-go `deepseek-v4-flash`, neutral family, 8 workers.
+- `--judge local` — local llama-server via `JUDGE_URL` (default `:8091`) +
+  `JUDGE_MODEL`. Use a NON-teacher family (e.g. Nemotron-4B, **not** Gemma — the
+  distillation teacher — to avoid self-preference bias). 2 workers (VRAM-bound).
+
+Cross-judge agreement is the robustness check: DeepSeek and Nemotron-4B both
+scored Spectre ep60 vs ep36 a wash (54% / 56%), confirming the verdict isn't a
+single-judge artifact.
 
 ## Files
 
