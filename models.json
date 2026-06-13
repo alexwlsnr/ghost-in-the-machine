@@ -115,6 +115,22 @@
       "temp": 0.7
     },
     {
+      "id": "wisp-bytelevel",
+      "name": "Wisp (byte-level)",
+      "description": "Byte-level BPE (llama.cpp/GGUF-portable) \u2014 7.6M params \u00b7 7.0MB \u00b7 ternary_modern",
+      "bin": "model_wisp_bytelevel.bin",
+      "json": "model_wisp_bytelevel.json",
+      "params": "7.6M",
+      "ctx": 256,
+      "size_mb": 7.0,
+      "available": true,
+      "primary": false,
+      "group": "bpe",
+      "max_new": 80,
+      "temp": 0.6,
+      "rep_penalty": 1.35
+    },
+    {
       "id": "wisp-optimal",
       "name": "Wisp",
       "description": "5M params \u00b7 4.7MB \u00b7 byte-level \u00b7 original",
