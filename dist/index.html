@@ -133,6 +133,8 @@
     z-index: 100;
     padding: 4px 0;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+    max-height: 80vh;
+    overflow-y: auto;
   }
   #legacy-menu.open { display: block; }
 
@@ -384,7 +386,11 @@
       top: 42px; /* sits just below the model-switcher bar */
       right: 8px;
       min-width: 200px;
-      max-height: 60vh;
+      /* #screen carries a transform (visualViewport pin), so it is the containing
+         block for this fixed menu — 100% = the VISIBLE region height, not the full
+         layout viewport. Keeps the menu inside the window above the keyboard with
+         its own scroll, so there's no need to dismiss the keyboard to browse it. */
+      max-height: calc(100% - 52px);
       overflow-y: auto;
     }
     .legacy-item { font-size: 17px; padding: 8px 12px; }
@@ -932,11 +938,13 @@ async function boot() {
 const promptHistory = [];
 let historyIndex = -1;   // -1 = live input, 0 = most recent
 let liveDraft = '';      // saved input while browsing history
+let busy = false;        // generating — blocks re-submit WITHOUT blurring the input,
+                         // so the mobile keyboard never dismisses/re-pops on submit
 
 // ── Input handler ─────────────────────────────────────────────────────────
 input.addEventListener('keydown', async (e) => {
   // History navigation
-  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !input.readOnly) {
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !input.readOnly && !busy) {
     e.preventDefault();
     if (promptHistory.length === 0) return;
     if (e.key === 'ArrowUp') {
@@ -951,7 +959,8 @@ input.addEventListener('keydown', async (e) => {
     return;
   }
 
-  if (e.key !== 'Enter' || !activeModel() || input.readOnly) return;
+  if (e.key !== 'Enter' || !activeModel() || input.readOnly || busy) return;
+  e.preventDefault();  // stop the Android IME treating Enter as "done" and closing the keyboard
 
   const query = input.value.trim();
   if (!query) return;
@@ -963,7 +972,7 @@ input.addEventListener('keydown', async (e) => {
   liveDraft = '';
 
   input.value = '';
-  setInputEnabled(false);
+  busy = true;   // keep the input focused (keyboard stays up); just block re-submit
   appendLine(`> ${query.toUpperCase()}`, 'prompt');
 
   // Thinking indicator — pulses while model processes the prompt
@@ -1052,7 +1061,7 @@ input.addEventListener('keydown', async (e) => {
   const histInfo = histLen > 0 ? ` · ${histLen} turn${histLen > 1 ? 's' : ''} ctx` : '';
   perfInfo.textContent = `${tokenCount} tokens in ${elapsed.toFixed(0)}ms (${tokPerSec} tok/s)${histInfo}`;
 
-  setInputEnabled(true);
+  busy = false;   // re-enable submit; input kept focus throughout so no refocus needed
 });
 
 // ── Mobile: pin the UI to the visible viewport (above the keyboard) ─────────
