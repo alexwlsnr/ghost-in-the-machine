@@ -1,7 +1,7 @@
 {
   "version": "4.0",
   "weight_bits": 32,
-  "weight_format": "fp32",
+  "weight_format": "mixed-ternary",
   "architecture": {
     "type": "tiny_transformer",
     "arch": "ternary_modern",
@@ -18,7 +18,8 @@
     "use_rope": true,
     "use_rmsnorm": true,
     "use_swiglu": true,
-    "tie_weights": true
+    "tie_weights": true,
+    "head_tied": true
   },
   "sections": {
     "token_embed": {
@@ -645,18 +646,10 @@
         512
       ],
       "dtype": "float32"
-    },
-    "head_weight": {
-      "offset": 12699648,
-      "size": 8394752,
-      "shape": [
-        4099,
-        512
-      ],
-      "dtype": "float32"
     }
   },
   "tokenizer": {
+    "type": "char",
     "vocab_size": 4096,
     "special": {
       "pad": 0,

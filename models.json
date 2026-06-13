@@ -3,12 +3,12 @@
     {
       "id": "wisp-bpe-ternary-modern",
       "name": "Wisp",
-      "description": "RoPE + RMSNorm + SwiGLU + ternary — 7.6M params · 11.6MB",
+      "description": "RoPE + RMSNorm + SwiGLU + ternary \u2014 7.6M params \u00b7 7.0MB",
       "bin": "model_wisp_bpe_ternary_modern.bin",
       "json": "model_wisp_bpe_ternary_modern.json",
       "params": "7.6M",
       "ctx": 256,
-      "size_mb": 11.6,
+      "size_mb": 7.0,
       "available": true,
       "primary": true,
       "max_new": 80,
@@ -18,12 +18,12 @@
     {
       "id": "shade-bpe-ternary-modern",
       "name": "Shade",
-      "description": "RoPE + RMSNorm + SwiGLU + ternary — 11M params · 20.1MB",
+      "description": "RoPE + RMSNorm + SwiGLU + ternary \u2014 11M params \u00b7 12.7MB",
       "bin": "model_shade_bpe_ternary_modern.bin",
       "json": "model_shade_bpe_ternary_modern.json",
       "params": "11M",
       "ctx": 256,
-      "size_mb": 20.1,
+      "size_mb": 12.7,
       "available": true,
       "primary": true,
       "max_new": 100,
@@ -34,7 +34,7 @@
     {
       "id": "spectre-v2-preview",
       "name": "Spectre v2 (preview)",
-      "description": "35M params · 24MB · ternary_modern · ctx 512 · SODA blend (134M tokens) · mid-training preview (ep36, val 1.82)",
+      "description": "35M params \u00b7 24MB \u00b7 ternary_modern \u00b7 ctx 512 \u00b7 SODA blend (134M tokens) \u00b7 mid-training preview (ep36, val 1.82)",
       "bin": "model_spectre_v2_preview.bin",
       "json": "model_spectre_v2_preview.json",
       "params": "35.6M",
@@ -52,12 +52,12 @@
     {
       "id": "spectre-v1",
       "name": "Spectre",
-      "description": "35M params · 24MB · ternary_modern · trained on Revenant (38M tokens)",
+      "description": "35M params \u00b7 17.0MB \u00b7 ternary_modern \u00b7 trained on Revenant (38M tokens)",
       "bin": "model_spectre_v1.bin",
       "json": "model_spectre_v1.json",
       "params": "35.6M",
       "ctx": 256,
-      "size_mb": 24.2,
+      "size_mb": 17.0,
       "available": true,
       "primary": true,
       "max_new": 120,
@@ -69,7 +69,7 @@
     {
       "id": "wisp-bpe-ternary",
       "name": "Wisp BPE Ternary",
-      "description": "BPE ternary {-1,0,+1} — 6.3M params · 11.6MB",
+      "description": "BPE ternary {-1,0,+1} \u2014 6.3M params \u00b7 11.6MB",
       "bin": "model_wisp_bpe_ternary.bin",
       "json": "model_wisp_bpe_ternary.json",
       "params": "6.3M",
@@ -85,7 +85,7 @@
     {
       "id": "shade-bpe-ternary",
       "name": "Shade BPE Ternary",
-      "description": "BPE ternary {-1,0,+1} — 11M params · 19.6MB",
+      "description": "BPE ternary {-1,0,+1} \u2014 11M params \u00b7 19.6MB",
       "bin": "model_shade_bpe_ternary.bin",
       "json": "model_shade_bpe_ternary.json",
       "params": "11M",
@@ -102,7 +102,7 @@
     {
       "id": "wisp-bpe",
       "name": "Wisp BPE",
-      "description": "BPE fp32 — 7.6M params · 15MB",
+      "description": "BPE fp32 \u2014 7.6M params \u00b7 15MB",
       "bin": "model_wisp_bpe.bin",
       "json": "model_wisp_bpe.json",
       "params": "7.6M",
@@ -202,7 +202,7 @@
     {
       "id": "wisp-optimal",
       "name": "Wisp",
-      "description": "5M params · 4.7MB · byte-level · original",
+      "description": "5M params \u00b7 4.7MB \u00b7 byte-level \u00b7 original",
       "bin": "model_wisp_optimal_8bit.bin",
       "json": "model_wisp_optimal_8bit.json",
       "size_mb": 4.7,
@@ -216,7 +216,7 @@
     {
       "id": "shade-compact",
       "name": "Shade",
-      "description": "11M params · 11MB · byte-level · original",
+      "description": "11M params \u00b7 11MB \u00b7 byte-level \u00b7 original",
       "bin": "model_shade_compact_8bit.bin",
       "json": "model_shade_compact_8bit.json",
       "size_mb": 11,
@@ -230,7 +230,7 @@
     {
       "id": "wisp-ternary",
       "name": "Wisp Ternary",
-      "description": "First ternary model — 3.3M params · 1.6MB · {-1,0,+1} via STE",
+      "description": "First ternary model \u2014 3.3M params \u00b7 1.6MB \u00b7 {-1,0,+1} via STE",
       "bin": "model_wisp_ternary.bin",
       "json": "model_wisp_ternary.json",
       "params": "3.3M",
@@ -246,7 +246,7 @@
     {
       "id": "spec512-v1.2",
       "name": "Spec512 v1.2",
-      "description": "27M params · 27MB · ctx 1024 · clean filtered training",
+      "description": "27M params \u00b7 27MB \u00b7 ctx 1024 \u00b7 clean filtered training",
       "bin": "model_spec512_v1.2_8bit.bin",
       "json": "model_spec512_v1.2_8bit.json",
       "params": "27.6M",
@@ -262,7 +262,7 @@
     {
       "id": "spec512-v1.1",
       "name": "Spec512 v1.1",
-      "description": "27M params · 27MB · original SODA training (val=0.511)",
+      "description": "27M params \u00b7 27MB \u00b7 original SODA training (val=0.511)",
       "bin": "model_spec512_v1.1_8bit.bin",
       "json": "model_spec512_v1.1_8bit.json",
       "size_mb": 27,
@@ -277,7 +277,7 @@
     {
       "id": "spec512",
       "name": "Spec512 v1",
-      "description": "27M params · 27MB · original · ctx 1024",
+      "description": "27M params \u00b7 27MB \u00b7 original \u00b7 ctx 1024",
       "bin": "model_spec512_8bit.bin",
       "json": "model_spec512_8bit.json",
       "size_mb": 27,
@@ -291,7 +291,7 @@
     {
       "id": "shade-modern",
       "name": "Shade Modern",
-      "description": "14M params · 14MB · modern arch · val_loss 0.580",
+      "description": "14M params \u00b7 14MB \u00b7 modern arch \u00b7 val_loss 0.580",
       "bin": "model_shade_modern_8bit.bin",
       "json": "model_shade_modern_8bit.json",
       "size_mb": 14,
@@ -304,7 +304,7 @@
     {
       "id": "wisp-8bit",
       "name": "Wisp 8-bit",
-      "description": "3.3M params · 3.6MB · 8-bit quantized",
+      "description": "3.3M params \u00b7 3.6MB \u00b7 8-bit quantized",
       "bin": "model_wisp_8bit.bin",
       "json": "model_wisp_8bit.json",
       "size_mb": 3.6,
@@ -317,7 +317,7 @@
     {
       "id": "shade-8bit",
       "name": "Shade 8-bit",
-      "description": "10.9M params · 11MB · 8-bit quantized",
+      "description": "10.9M params \u00b7 11MB \u00b7 8-bit quantized",
       "bin": "model_shade_8bit.bin",
       "json": "model_shade_8bit.json",
       "size_mb": 11,
@@ -330,7 +330,7 @@
     {
       "id": "shade-4bit",
       "name": "Shade 4-bit",
-      "description": "10.9M params · 6MB · grouped quant",
+      "description": "10.9M params \u00b7 6MB \u00b7 grouped quant",
       "bin": "model_shade_4bit.bin",
       "json": "model_shade_4bit.json",
       "size_mb": 6,
@@ -343,7 +343,7 @@
     {
       "id": "spec512-4bit",
       "name": "Spec512 4-bit",
-      "description": "27M params · 18MB · grouped quant",
+      "description": "27M params \u00b7 18MB \u00b7 grouped quant",
       "bin": "model_spec512_4bit.bin",
       "json": "model_spec512_4bit.json",
       "size_mb": 18,
@@ -357,7 +357,7 @@
     {
       "id": "wisp-fp32",
       "name": "Wisp fp32",
-      "description": "3.3M params · 13MB · fp32 reference",
+      "description": "3.3M params \u00b7 13MB \u00b7 fp32 reference",
       "bin": "model_wisp_fp32.bin",
       "json": "model_wisp_fp32.json",
       "size_mb": 13,
@@ -370,7 +370,7 @@
     {
       "id": "shade-fp32",
       "name": "Shade fp32",
-      "description": "10.9M params · 42MB · fp32 reference",
+      "description": "10.9M params \u00b7 42MB \u00b7 fp32 reference",
       "bin": "model_shade_fp32.bin",
       "json": "model_shade_fp32.json",
       "size_mb": 42,
@@ -383,7 +383,7 @@
     {
       "id": "shade-bf16",
       "name": "Shade bf16",
-      "description": "10.9M params · 22MB · bf16",
+      "description": "10.9M params \u00b7 22MB \u00b7 bf16",
       "bin": "model_shade_bf16.bin",
       "json": "model_shade_bf16.json",
       "size_mb": 22,
@@ -396,7 +396,7 @@
     {
       "id": "spec512-fp32",
       "name": "Spec512 fp32",
-      "description": "27M params · 99MB · fp32 reference",
+      "description": "27M params \u00b7 99MB \u00b7 fp32 reference",
       "bin": "model_spec512_fp32.bin",
       "json": "model_spec512_fp32.json",
       "size_mb": 99,
