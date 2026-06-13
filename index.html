@@ -549,7 +549,12 @@ function appendLine(text, cls = '') {
 }
 
 function setInputEnabled(enabled) {
-  input.disabled = !enabled;
+  // Use readOnly, never disabled: a disabled input loses focus, which on mobile
+  // dismisses the on-screen keyboard — then re-focusing on completion makes it
+  // pop back up over the response. readOnly blocks input while keeping focus,
+  // so the keyboard stays put across the generate cycle.
+  input.disabled = false;
+  input.readOnly = !enabled;
   if (enabled) input.focus();
 }
 
@@ -931,7 +936,7 @@ let liveDraft = '';      // saved input while browsing history
 // ── Input handler ─────────────────────────────────────────────────────────
 input.addEventListener('keydown', async (e) => {
   // History navigation
-  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !input.disabled) {
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !input.readOnly) {
     e.preventDefault();
     if (promptHistory.length === 0) return;
     if (e.key === 'ArrowUp') {
@@ -946,7 +951,7 @@ input.addEventListener('keydown', async (e) => {
     return;
   }
 
-  if (e.key !== 'Enter' || !activeModel() || input.disabled) return;
+  if (e.key !== 'Enter' || !activeModel() || input.readOnly) return;
 
   const query = input.value.trim();
   if (!query) return;
@@ -1050,6 +1055,25 @@ input.addEventListener('keydown', async (e) => {
   setInputEnabled(true);
 });
 
+// ── Mobile: keep the layout above the on-screen keyboard ────────────────────
+// When the keyboard opens it shrinks visualViewport (but not the CSS 100dvh
+// layout viewport). Size #screen to the visible height so the input line sits
+// just above the keyboard and #terminal stays scrollable in the space between,
+// rather than the keyboard overlaying the response.
+(function () {
+  const vv = window.visualViewport;
+  if (!vv) return;  // desktop / unsupported → CSS 100dvh already handles it
+  const screen = document.getElementById('screen');
+  const fit = () => {
+    screen.style.height = vv.height + 'px';
+    window.scrollTo(0, 0);                       // iOS can offset the page under the keyboard
+    terminal.scrollTop = terminal.scrollHeight;  // keep latest output in view
+  };
+  vv.addEventListener('resize', fit);
+  vv.addEventListener('scroll', fit);
+  fit();
+})();
+
 // ── Legacy model dropdown ─────────────────────────────────────────────────
 const legacyBtn  = document.getElementById('legacy-btn');
 const legacyMenu = document.getElementById('legacy-menu');
@@ -1119,10 +1143,10 @@ document.getElementById('clear-btn').addEventListener('click', () => {
 });
 
 // ── Global key capture — route printable keys to the input ───────────────
-// Skips when: input is disabled, input already has focus, a button has focus,
-// or a modifier key is held (so Ctrl+C on terminal selection still works).
+// Skips when: input is read-only (boot/generating), input already has focus, a
+// button has focus, or a modifier key is held (so Ctrl+C on a selection works).
 document.addEventListener('keydown', (e) => {
-  if (input.disabled) return;
+  if (input.readOnly) return;
   if (document.activeElement === input) return;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key.length !== 1) return;                 // arrow keys, Tab, Enter, etc.
