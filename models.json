@@ -50,6 +50,23 @@
       "rep_penalty": 1.2
     },
     {
+      "id": "spectre-v2-ep100",
+      "name": "Spectre v2 (ep100)",
+      "description": "35.6M params \u00b7 16MB \u00b7 ternary_modern \u00b7 ctx 512 \u00b7 ep100 final (val 1.59)",
+      "bin": "model_spectre_v2_ep100.bin",
+      "json": "model_spectre_v2_ep100.json",
+      "params": "35.6M",
+      "ctx": 512,
+      "size_mb": 16.2,
+      "available": true,
+      "primary": false,
+      "max_new": 120,
+      "temp": 0.7,
+      "top_k": 40,
+      "top_p": 0.9,
+      "rep_penalty": 1.2
+    },
+    {
       "id": "spectre-v2-ep60",
       "name": "Spectre v2 (ep60)",
       "description": "35M params \u00b7 17MB \u00b7 ternary_modern \u00b7 ctx 512 \u00b7 ep60 (val 1.75) \u00b7 A/B vs preview",
