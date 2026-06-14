@@ -36,8 +36,11 @@ SYSTEM = (
     "short, direct, on-topic replies (one or two sentences, no rambling, no filler). "
     "Rate how well the ASSISTANT turns below fit that target on a 1-5 scale:\n"
     "5 = ideal: short, direct, correct, on-topic\n"
-    "3 = acceptable but a bit long or generic\n"
-    "1 = poor: verbose/rambling, off-topic, or nonsensical\n"
+    "4 = good: on-topic and direct but slightly long, or a touch generic\n"
+    "3 = ok: acceptable but noticeably long-ish or generic\n"
+    "2 = weak: verbose or partly off-topic\n"
+    "1 = poor: rambling, off-topic, or nonsensical\n"
+    "Use the FULL range — 4 is common for decent-but-wordy replies.\n"
     "Reply with ONLY a single digit 1-5. No words, no punctuation."
 )
 MAX_TRANSCRIPT_CHARS = 1600  # keep prompt well under judge ctx
